@@ -31,7 +31,7 @@ object MediaPipelineChecks : BuildType({
             scriptContent = """
             python -m venv .venv
             . .venv/bin/activate
-            pip install "apache-airflow==2.9.1"
+            pip install "apache-airflow"
             python -m compileall pipelines/airflow/dags
             """.trimIndent()
         }
