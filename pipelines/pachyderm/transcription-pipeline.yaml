@@ -1,0 +1,42 @@
+# Prototype Pachyderm pipeline that versions generated transcripts.
+#
+# The pipeline expects an input repo that receives transcript artifacts from the
+# Airflow workflow. In production the `cmd` section would invoke a dedicated
+# transcript post-processing container. For now, we use a lightweight image that
+# simply copies data into the output repo so we can validate the end-to-end
+# wiring.
+
+pipeline:
+  name: transcription-postprocess
+
+description: |
+  Normalize raw transcript JSON and store the cleaned output in a versioned
+  Pachyderm repository. This is a placeholder implementation that can be
+  expanded with NLP clean-up, timestamp correction, and metadata enrichment.
+
+transform:
+  image: alpine:3.19
+  cmd:
+    - /bin/sh
+    - -c
+    - |
+      echo "Copying transcripts into the output repo";
+      cp -vr /pfs/raw-transcripts/. /pfs/out/
+
+input:
+  pfs:
+    repo: raw-transcripts
+    glob: "/"
+
+parallelism_spec:
+  constant: 1
+
+resource_requests:
+  memory: 128Mi
+  cpu: 0.5
+
+# Uncomment when a storage class is provisioned
+# sidecar_resource_requests:
+#   memory: 128Mi
+#   cpu: 0.5
+

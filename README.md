@@ -91,3 +91,13 @@ This project aims to:
 
 - **Code:** MIT  
 - **Data/Content:** Licensed per dataset manifest (to be defined)
+
+## Pipelines
+
+- **Airflow DAGs**: `pipelines/airflow/dags/media_ingestion_dag.py` defines the prototype ingestion workflow.
+- **Pachyderm Pipelines**: `pipelines/pachyderm/transcription-pipeline.yaml` versions cleaned transcripts.
+
+## Continuous Integration
+
+TeamCity Kotlin DSL files live in `ci/teamcity`. The `Media Pipeline Checks` build configuration
+validates DAG syntax and lints pipeline specs so that broken workflows are caught early.
