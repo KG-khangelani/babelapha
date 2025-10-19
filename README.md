@@ -1,12 +1,10 @@
-# 🧠 Media Platform
-
 ### Transparent, Computation-Friendly Interview Library
 
 ---
 
-## 🚀 What This Project Is About
+## What This Project Is About
 
-**Media Platform** is an open project to turn interview videos into searchable, versioned, and analyzable data.
+This is an open project to turn interview videos into searchable, versioned, and analyzable data.
 
 It starts simple:
 - We upload videos to **MinIO (S3)**.
@@ -21,7 +19,7 @@ and an **interactive provenance explorer** so anyone can visually trace how each
 
 ---
 
-## 🧱 Project Structure (Simplified)
+## Project Structure (Simplified)
 
 ```
 ├─ README.md
@@ -39,7 +37,7 @@ and an **interactive provenance explorer** so anyone can visually trace how each
 
 ---
 
-## 🧩 Core Technologies
+## Core Technologies
 
 | Purpose | Tool |
 |----------|------|
@@ -53,7 +51,7 @@ and an **interactive provenance explorer** so anyone can visually trace how each
 
 ---
 
-## 🧪 Getting Started (Local Dev)
+## Getting Started (Local Dev)
 
 ### 1. Run the API
 ```bash
@@ -74,7 +72,7 @@ We’ll add a simple `docker-compose.yml` soon to bring up MinIO, the API, and t
 
 ---
 
-## 🎯 Objectives
+## Objectives
 
 This project aims to:
 1. Build an open-source foundation for multimedia research data.
