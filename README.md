@@ -1,12 +1,13 @@
-## Transparent, Computation-Friendly Interview Library
+# Babelapha
+> **Note:** "Babelapha" is a working placeholder name. Until a name worthy to replace it comesby.
 
----
 
 ## What This Project Is About
 
-This is an open project to turn interview videos into searchable, versioned, and analyzable data.
+**Media Platform** is an open project to turn interview videos into searchable, versioned, and analyzable data.
 
 It starts simple:
+
 - We upload videos to **MinIO (S3)**.
 - **Airflow** runs workflows that extract audio, create transcripts, and store metadata.
 - **Pachyderm** versions all data so every change is traceable.
@@ -54,6 +55,7 @@ and an **interactive provenance explorer** so anyone can visually trace how each
 ## Getting Started (Local Dev)
 
 ### 1. Run the API
+
 ```bash
 cd services/api
 pip install -r requirements.txt
@@ -61,6 +63,7 @@ uvicorn app.main:app --reload
 ```
 
 ### 2. Run the Web App
+
 ```bash
 cd services/web
 npm install
@@ -68,6 +71,7 @@ npm run dev
 ```
 
 ### 3. (Optional) Run everything via Docker Compose
+
 We’ll add a simple `docker-compose.yml` soon to bring up MinIO, the API, and the web frontend in one command.
 
 ---
@@ -75,6 +79,7 @@ We’ll add a simple `docker-compose.yml` soon to bring up MinIO, the API, and t
 ## Objectives
 
 This project aims to:
+
 1. Build an open-source foundation for multimedia research data.
 2. Make interview datasets reproducible, transparent, and accessible.
 3. Introduce **interactive provenance** — a visual system that lets users explore how each artifact was created (which workflow, dataset version, and model produced it).
@@ -82,7 +87,7 @@ This project aims to:
 
 ---
 
-## 🪪 License
+## License
 
 - **Code:** MIT  
 - **Data/Content:** Licensed per dataset manifest (to be defined)
