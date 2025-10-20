@@ -1,0 +1,8 @@
+# file: docker/transcode/Dockerfile
+FROM jrottenberg/ffmpeg:6.1-ubuntu
+RUN apt-get update && apt-get install -y python3 python3-pip curl jq awscli && rm -rf /var/lib/apt/lists/*
+RUN curl -L https://github.com/pachyderm/pachyderm/releases/latest/download/pachctl_2.7.0_linux_amd64.tar.gz \
+  | tar -xz && mv pachctl_*/pachctl /usr/local/bin/pachctl && rm -rf pachctl_*
+COPY transcode.py /app/transcode.py
+WORKDIR /app
+ENTRYPOINT ["python3","/app/transcode.py"]
