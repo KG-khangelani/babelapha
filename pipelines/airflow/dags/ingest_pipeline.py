@@ -1,6 +1,6 @@
-from airflow import DAG
+from airflow.sdk import dag, task
 from datetime import datetime, timedelta
-from airflow.operators import PythonOperator, EmptyOperator, KubernetesPodOperator, EmptyOperator
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 import os
 
 # ---------------------------------------------------------------------
@@ -12,16 +12,17 @@ import os
 
 default_args = dict(retries=2)
 
-with DAG(
+@dag(
     dag_id="ingest_pipeline",
     description="Media ingestion and processing flow integrated with Pachyderm",
+    # start_date=datetime(2024, 1, 1),
     schedule=None,
     catchup=False,
     default_args=default_args,
     max_active_runs=8,
     tags=["ingest", "pachyderm", "media"],
-) as dag:
-
+)
+def ingest_pipeline():
     # -------------------------------
     # Helper: common environment vars
     # -------------------------------
@@ -37,7 +38,9 @@ with DAG(
     # -------------------------------
     # DAG start
     # -------------------------------
-    start = EmptyOperator(task_id="start")
+    @task
+    def start():
+        return "Starting pipeline"
 
     # -------------------------------
     # Virus Scan (ClamAV)
@@ -76,16 +79,12 @@ with DAG(
     # Could read report JSON to decide to quarantine or proceed to transcode
     # For now: always proceed to transcode
     # -------------------------------
+    @task
     def route_decision(**context):
         # Example logic for future use:
         # reports_path = f"/reports/{context['dag_run'].conf['id']}/validation.json"
         # read from PFS if needed
         return "transcode"
-
-    route = PythonOperator(
-        task_id="route_decision",
-        python_callable=route_decision,
-    )
 
     # -------------------------------
     # Transcode (HLS/DASH)
@@ -106,7 +105,12 @@ with DAG(
     # -------------------------------
     # DAG end
     # -------------------------------
-    end = EmptyOperator(task_id="end")
+    @task
+    def end():
+        return "Pipeline complete"
 
     # DAG structure
-    start >> virus_scan >> validate_media >> route >> transcode >> end
+    start() >> virus_scan >> validate_media >> route_decision() >> transcode >> end()
+
+# Instantiate the DAG
+ingest_pipeline()
