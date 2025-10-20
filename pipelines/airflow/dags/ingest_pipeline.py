@@ -1,8 +1,6 @@
 from airflow import DAG
-from airflow.utils.dates import days_ago
-from airflow.operators.empty import EmptyOperator
-from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
-from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
+from airflow.operators import PythonOperator, EmptyOperator, KubernetesPodOperator, EmptyOperator
 import os
 
 # ---------------------------------------------------------------------
@@ -17,7 +15,6 @@ default_args = dict(retries=2)
 with DAG(
     dag_id="ingest_pipeline",
     description="Media ingestion and processing flow integrated with Pachyderm",
-    start_date=days_ago(1),
     schedule=None,
     catchup=False,
     default_args=default_args,
