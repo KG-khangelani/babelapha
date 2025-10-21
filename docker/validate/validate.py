@@ -1,6 +1,6 @@
 import os, json, subprocess, sys, pathlib, re
 from datetime import datetime
-from pfs_move import move_path
+from utils.pfs_move import move_path
 
 SRC_PATH = os.environ["SRC_PATH"]       # /scanned/<id>/<file>
 ID       = os.environ["OBJ_ID"]

@@ -1,7 +1,7 @@
 # file: docker/clamav/scan.py
 import os, json, subprocess, sys, pathlib
 from datetime import datetime
-from pfs_move import move_path
+from utils.pfs_move import move_path
 
 PACH_TOKEN = os.environ.get("PACH_TOKEN","")
 if PACH_TOKEN: os.environ["PACHTOKEN"] = PACH_TOKEN
