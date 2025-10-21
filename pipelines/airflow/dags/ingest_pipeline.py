@@ -1,6 +1,7 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.providers.cncf.kubernetes.secrets import Secret
 import os
 
 # ---------------------------------------------------------------------
@@ -28,12 +29,13 @@ def ingest_pipeline():
     # -------------------------------
     def base_env():
         return {
-            "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pach-s3.pachd:30600"),
+            "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachderm:1600"),
             "PACH_S3_PREFIX": os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master"),
-            "PACH_TOKEN": os.environ.get("PACH_TOKEN", ""),
             "PFS_REPO": "media",
             "PFS_BRANCH": "master",
         }
+
+    pach_token = Secret(deploy_type="env", deploy_target="PACH_TOKEN", secret="pach-auth-media", key="token")
 
     # -------------------------------
     # DAG start
@@ -54,6 +56,7 @@ def ingest_pipeline():
             "OBJ_ID": "{{ dag_run.conf['id'] }}",
             "SRC_PATH": "/incoming/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
         },
+        secrets=[pach_token],
         get_logs=True,
         is_delete_operator_pod=True,
     )
@@ -70,6 +73,7 @@ def ingest_pipeline():
             "OBJ_ID": "{{ dag_run.conf['id'] }}",
             "SRC_PATH": "/scanned/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
         },
+        secrets=[pach_token],
         get_logs=True,
         is_delete_operator_pod=True,
     )
@@ -98,6 +102,7 @@ def ingest_pipeline():
             "OBJ_ID": "{{ dag_run.conf['id'] }}",
             "SRC_PATH": "/validated/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
         },
+        secrets=[pach_token],
         get_logs=True,
         is_delete_operator_pod=True,
     )
