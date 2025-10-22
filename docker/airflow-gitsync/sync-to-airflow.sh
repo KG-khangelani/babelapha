@@ -47,10 +47,32 @@ echo "✓ Found source directory: ${SOURCE_DIR}"
 # Find Airflow scheduler pod (in-cluster kubectl access)
 echo ''
 echo 'Finding Airflow scheduler pod...'
-SCHEDULER_POD=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${AIRFLOW_POD_LABEL} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+echo "  Namespace: ${AIRFLOW_NAMESPACE}"
+echo "  Label: ${AIRFLOW_POD_LABEL}"
+
+# Debug: Check if kubectl works
+if ! kubectl version --client > /dev/null 2>&1; then
+    echo '✗ Error: kubectl not working'
+    exit 1
+fi
+
+# Debug: List all pods in namespace
+echo "  Checking pods in namespace..."
+kubectl get pods -n ${AIRFLOW_NAMESPACE} 2>&1 || {
+    echo "✗ Error: Cannot access namespace '${AIRFLOW_NAMESPACE}'"
+    echo "  Possible causes:"
+    echo "  - Namespace doesn't exist"
+    echo "  - No kubeconfig mounted"
+    echo "  - Insufficient permissions"
+    exit 1
+}
+
+SCHEDULER_POD=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${AIRFLOW_POD_LABEL} -o jsonpath='{.items[0].metadata.name}' 2>&1)
 
 if [ -z "${SCHEDULER_POD}" ]; then
-    echo '✗ Error: Could not find Airflow scheduler pod'
+    echo "✗ Error: Could not find Airflow scheduler pod with label '${AIRFLOW_POD_LABEL}'"
+    echo "  Available pods:"
+    kubectl get pods -n ${AIRFLOW_NAMESPACE} -o custom-columns=NAME:.metadata.name,LABELS:.metadata.labels
     exit 1
 fi
 
