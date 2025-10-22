@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+# Install Airflow with providers for validation
+RUN pip install --no-cache-dir \
+    "apache-airflow==2.9.1" \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt" && \
+    pip install --no-cache-dir \
+    apache-airflow-providers-cncf-kubernetes \
+    apache-airflow-providers-amazon
+
+# Copy validation script
+COPY validate_dags.py /usr/local/bin/validate_dags.py
+RUN chmod +x /usr/local/bin/validate_dags.py
+
+ENTRYPOINT ["python", "/usr/local/bin/validate_dags.py"]

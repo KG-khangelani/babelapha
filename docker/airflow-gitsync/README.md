@@ -2,20 +2,36 @@
 
 This GitSync container automatically syncs DAGs from the Git repository to your Airflow deployment running in the same Kubernetes cluster.
 
+## Docker Containers
+
+### 1. Validation Container (`Dockerfile.validate`)
+Pre-built with Airflow + providers for DAG validation
+
+### 2. GitSync Container (`Dockerfile`)
+Lightweight Alpine container for syncing DAGs to Kubernetes
+
 ## Quick Start
 
-### Build the container:
+### Build containers:
 ```bash
 cd docker/airflow-gitsync
+
+# Build validation container
+docker build -f Dockerfile.validate -t airflow-dag-validator:latest .
+
+# Build sync container
 docker build -t airflow-gitsync:latest .
 ```
 
-### Test sync (from cluster):
+### Test locally:
 ```bash
+# Test validation (from repo root)
+docker run --rm -v $(pwd):/workspace airflow-dag-validator:latest
+
+# Test sync (from cluster)
 docker run --rm \
   -e GITHUB_REPO_URL=https://github.com/KG-khangelani/babelapha.git \
   -e GITHUB_BRANCH=main \
-  -e AIRFLOW_NAMESPACE=airflow \
   -v ~/.kube:/root/.kube:ro \
   --network host \
   airflow-gitsync:latest
@@ -26,58 +42,16 @@ docker run --rm \
 ### Build Steps:
 
 **Step 1: Validate DAG Syntax**
-
-Reference: `docker/airflow-gitsync/validate_dags.sh`
-
 ```bash
-#!/bin/bash
-set -e
+# Build validator image
+docker build -f docker/airflow-gitsync/Dockerfile.validate \
+  -t airflow-dag-validator:%build.number% \
+  docker/airflow-gitsync/
 
-echo "==> Installing Airflow for DAG validation"
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install --upgrade pip setuptools wheel
-pip install "apache-airflow==2.9.1" \
-  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt"
-
-# Install providers used in DAGs
-pip install \
-  apache-airflow-providers-cncf-kubernetes \
-  apache-airflow-providers-amazon
-
-echo "==> Validating DAG syntax"
-python - <<'PYEOF'
-import sys
-import py_compile
-from pathlib import Path
-
-dag_folder = Path("pipelines/airflow/dags")
-dag_files = list(dag_folder.glob("*.py"))
-
-if not dag_files:
-    print("✗ No DAG files found")
-    sys.exit(1)
-
-print(f"Found {len(dag_files)} DAG file(s)")
-errors = []
-
-for dag_file in dag_files:
-    try:
-        py_compile.compile(str(dag_file), doraise=True)
-        print(f"  ✓ {dag_file.name}")
-    except py_compile.PyCompileError as e:
-        print(f"  ✗ {dag_file.name}: {e}")
-        errors.append((dag_file.name, str(e)))
-
-if errors:
-    print("\n✗ Syntax errors detected:")
-    for filename, error in errors:
-        print(f"  {filename}: {error}")
-    sys.exit(1)
-
-print("\n✓ All DAG files passed syntax validation")
-PYEOF
+# Run validation
+docker run --rm \
+  -v %teamcity.build.checkoutDir%:/workspace \
+  airflow-dag-validator:%build.number%
 ```
 
 **Step 2: Build GitSync Container**
