@@ -1,0 +1,31 @@
+# RBAC resources to allow TeamCity agent (default service account) to sync DAGs to Airflow
+# 
+# IMPORTANT: Replace 'teamcity' with your actual TeamCity namespace where the agent pods run
+#
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-dag-sync
+  namespace: airflow
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: teamcity-agent-airflow-access
+  namespace: airflow
+subjects:
+  - kind: ServiceAccount
+    name: default  # TeamCity agent uses default service account
+    namespace: teamcity  # CHANGE THIS to your TeamCity namespace
+roleRef:
+  kind: Role
+  name: airflow-dag-sync
+  apiGroup: rbac.authorization.k8s.io
