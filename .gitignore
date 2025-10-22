@@ -1,0 +1,161 @@
+# Operating System
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime / environment
+.env
+.env.local
+.env.*.local
+.envrc
+*.pem
+*.key
+
+# Node.js
+node_modules/
+jspm_packages/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+.pnpm-debug.log
+dist/
+build/
+tmp/
+.cache/
+.nyc_output/
+.next/
+.next.cache/
+.out/
+.nuxt/
+.public/
+.vite/
+.svelte-kit/
+*.tgz
+
+# Package manager lockfiles (committed usually) - do NOT ignore:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# TypeScript
+*.tsbuildinfo
+
+# Bundlers / tooling
+.cache/
+.parcel-cache/
+.vscode/
+.idea/
+.sass-cache/
+.coverage/
+coverage/
+reports/
+
+# Test output
+coverage/
+*.lcov
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+ENV/
+env/
+.venv/
+.python-version
+build/
+develop-eggs/
+dist/
+.eggs/
+*.egg-info/
+.installed.cfg
+pip-wheel-metadata/
+
+# Java / JVM
+*.class
+*.war
+*.jar
+*.ear
+*.nar
+hs_err_pid*
+.classpath
+.project
+.settings/
+target/
+build.gradle.kts.lock
+
+# Go
+bin/
+pkg/
+*.exe
+*.exe~
+*.test
+coverage.out
+
+
+# JavaScript frameworks & tools
+/.parcel-cache/
+/.cache/
+/dist/
+/build/
+/public/build/
+/coverage/
+
+# Docker
+docker-compose.override.yml
+docker-compose.*.local.yml
+.docker/
+**/.env.docker
+
+# Kubernetes / Helm
+*.kubeconfig
+*.kube/
+*.manifest
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*.backup
+crash.log
+override.tf
+override.tf.json
+terraform.tfvars
+terraform.tfvars.json
+
+# IDEs and editors
+.vscode/
+.history/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# Misc
+*.log.*
+*.bak
+*.swp
+*~
+*.tmp
+Thumbs.db
+.cache
+coverage/
+reports/
+
+# Ignore secrets and credentials backups
+secrets/
+*.secret
+*.credentials
+
+# Keep examples and templates in repo (do not ignore)
+!.env.example
+!.env.sample
+!.gitignore
