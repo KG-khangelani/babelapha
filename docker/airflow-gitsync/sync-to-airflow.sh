@@ -34,9 +34,12 @@ CLONE_DIR="/tmp/repo"
 rm -rf "${CLONE_DIR}"
 
 # Configure git for better network handling
+# See: https://stackoverflow.com/questions/58372156/how-can-i-resolve-recv-failure-connection-reset-by-peer-error
 git config --global http.postBuffer 524288000
-git config --global http.lowSpeedLimit 1000
-git config --global http.lowSpeedTime 600
+git config --global http.lowSpeedLimit 0
+git config --global http.lowSpeedTime 999999
+git config --global pack.windowMemory 256m
+git config --global pack.packSizeLimit 256m
 
 CLONE_ATTEMPTS=3
 CLONE_RETRY=0
@@ -53,25 +56,50 @@ set +e
 
 while [ ${CLONE_RETRY} -lt ${CLONE_ATTEMPTS} ]; do
     CLONE_RETRY=$((CLONE_RETRY + 1))
-    echo "Attempt ${CLONE_RETRY}/${CLONE_ATTEMPTS}..."
+    echo "Attempt ${CLONE_RETRY}/${CLONE_ATTEMPTS} (git clone)..."
     
-    if git clone --depth 1 --branch "${GITHUB_BRANCH}" "${GIT_URL}" "${CLONE_DIR}"; then
-        echo '✓ Repository cloned'
+    # Use minimal clone options to reduce data transfer
+    if GIT_CURL_VERBOSE=0 GIT_TRACE=0 git clone \
+        --depth 1 \
+        --single-branch \
+        --branch "${GITHUB_BRANCH}" \
+        --no-tags \
+        "${GIT_URL}" \
+        "${CLONE_DIR}"; then
+        echo '✓ Repository cloned via git'
         set -e  # Re-enable exit on error
         break
     else
         if [ ${CLONE_RETRY} -lt ${CLONE_ATTEMPTS} ]; then
-            echo "⚠ Clone failed, retrying in 5 seconds..."
+            echo "⚠ Git clone failed, retrying in 5 seconds..."
             sleep 5
             rm -rf "${CLONE_DIR}"
         else
-            echo '✗ Error: Failed to clone repository after ${CLONE_ATTEMPTS} attempts'
-            echo '  Last error was connection reset - possible causes:'
-            echo '  - Network timeout or MTU issues'
-            echo '  - Proxy or firewall blocking HTTPS'
-            echo '  - GitHub rate limiting'
-            set -e
-            exit 1
+            # Fallback: try downloading as tarball
+            echo "⚠ Git clone failed all attempts, trying tarball download..."
+            REPO_NAME=$(echo "${GITHUB_REPO_URL}" | sed 's|.git$||' | sed 's|https://github.com/||')
+            TARBALL_URL="https://github.com/${REPO_NAME}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz"
+            
+            mkdir -p "${CLONE_DIR}"
+            if [ -n "${GITHUB_TOKEN}" ]; then
+                curl -L -H "Authorization: token ${GITHUB_TOKEN}" "${TARBALL_URL}" | tar -xz -C "${CLONE_DIR}" --strip-components=1
+            else
+                curl -L "${TARBALL_URL}" | tar -xz -C "${CLONE_DIR}" --strip-components=1
+            fi
+            
+            if [ $? -eq 0 ]; then
+                echo '✓ Repository downloaded via tarball'
+                set -e
+                break
+            else
+                echo "✗ Error: Both git clone and tarball download failed"
+                echo '  Possible causes:'
+                echo '  - Network timeout or MTU issues'
+                echo '  - Proxy or firewall blocking HTTPS'
+                echo '  - GitHub rate limiting or authentication issues'
+                set -e
+                exit 1
+            fi
         fi
     fi
 done
