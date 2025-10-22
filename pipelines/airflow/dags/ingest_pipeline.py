@@ -119,3 +119,4 @@ def ingest_pipeline():
 
 # Instantiate the DAG
 ingest_pipeline()
+# inja madoda

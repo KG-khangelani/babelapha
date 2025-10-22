@@ -6,7 +6,7 @@ echo ''
 
 WORKSPACE_DIR=${WORKSPACE_DIR:-/workspace}
 AIRFLOW_NAMESPACE=${AIRFLOW_NAMESPACE:-airflow}
-AIRFLOW_POD_LABEL=${AIRFLOW_POD_LABEL:-component=scheduler}
+AIRFLOW_POD_LABEL=${AIRFLOW_POD_LABEL:-component=dag-processor}
 DAGS_FOLDER=${DAGS_FOLDER:-/opt/airflow/dags}
 SOURCE_DIR=${SOURCE_DIR:-pipelines/airflow/dags}
 BUILD_NUMBER=${BUILD_NUMBER:-1}
@@ -41,8 +41,8 @@ echo "  Files to sync:"
 ls -lh "${SOURCE_PATH}"/*.py 2>/dev/null || echo "  No .py files found"
 echo ''
 
-# Find Airflow scheduler pod
-echo 'Finding Airflow scheduler pod...'
+# Find Airflow processor pod
+echo 'Finding Airflow processor pod...'
 echo "  Namespace: ${AIRFLOW_NAMESPACE}"
 echo "  Label: ${AIRFLOW_POD_LABEL}"
 
@@ -60,16 +60,16 @@ kubectl get pods -n ${AIRFLOW_NAMESPACE} 2>&1 || {
     exit 1
 }
 
-SCHEDULER_POD=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${AIRFLOW_POD_LABEL} -o jsonpath='{.items[0].metadata.name}' 2>&1)
+PROCESSOR_POD=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${AIRFLOW_POD_LABEL} -o jsonpath='{.items[0].metadata.name}' 2>&1)
 
-if [ -z "${SCHEDULER_POD}" ]; then
-    echo "✗ Error: Could not find Airflow scheduler pod with label '${AIRFLOW_POD_LABEL}'"
+if [ -z "${PROCESSOR_POD}" ]; then
+    echo "✗ Error: Could not find Airflow processor pod with label '${AIRFLOW_POD_LABEL}'"
     echo "  Available pods:"
     kubectl get pods -n ${AIRFLOW_NAMESPACE} -o custom-columns=NAME:.metadata.name,LABELS:.metadata.labels
     exit 1
 fi
 
-echo "✓ Found scheduler pod: ${SCHEDULER_POD}"
+echo "✓ Found processor pod: ${PROCESSOR_POD}"
 
 # Sync DAG files
 echo ''
@@ -81,7 +81,7 @@ for dag_file in "${SOURCE_PATH}"/*.py; do
         echo "  → Copying ${DAG_NAME}"
         
         # Copy file directly to pod
-        kubectl cp "${dag_file}" "${AIRFLOW_NAMESPACE}/${SCHEDULER_POD}:${DAGS_FOLDER}/${DAG_NAME}"
+        kubectl cp "${dag_file}" "${AIRFLOW_NAMESPACE}/${PROCESSOR_POD}:${DAGS_FOLDER}/${DAG_NAME}"
         
         DAG_COUNT=$((DAG_COUNT + 1))
     fi
@@ -96,7 +96,7 @@ echo ''
 echo "✓ Successfully synced ${DAG_COUNT} DAG(s) to Airflow!"
 echo ''
 echo 'Triggering DAG refresh...'
-kubectl exec -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -- airflow dags list || true
+kubectl exec -n ${AIRFLOW_NAMESPACE} ${PROCESSOR_POD} -- airflow dags list || true
 
 echo ''
 echo '✓ Sync complete. Check Airflow UI for new DAGs.'
