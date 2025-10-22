@@ -14,6 +14,12 @@ SOURCE_DIR=${SOURCE_DIR:-pipelines/airflow/dags}
 BUILD_NUMBER=${BUILD_NUMBER:-1}
 BUILD_VCS_NUMBER=${BUILD_VCS_NUMBER:-unknown}
 
+# Use in-cluster service account if available
+if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
+    export KUBERNETES_SERVICE_HOST=${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}
+    export KUBERNETES_SERVICE_PORT=${KUBERNETES_SERVICE_PORT:-443}
+fi
+
 echo 'Configuration:'
 echo "  GitHub Repo: ${GITHUB_REPO_URL}"
 echo "  GitHub Branch: ${GITHUB_BRANCH}"
@@ -22,20 +28,55 @@ echo "  DAGs Directory: ${DAGS_FOLDER}"
 echo "  Build #${BUILD_NUMBER} (Commit: ${BUILD_VCS_NUMBER})"
 echo ''
 
-# Clone the repository
+# Clone the repository with retry logic
 echo 'Cloning repository...'
 CLONE_DIR="/tmp/repo"
 rm -rf "${CLONE_DIR}"
 
+# Configure git for better network handling
+git config --global http.postBuffer 524288000
+git config --global http.lowSpeedLimit 1000
+git config --global http.lowSpeedTime 600
+
+CLONE_ATTEMPTS=3
+CLONE_RETRY=0
+
 if [ -n "${GITHUB_TOKEN}" ]; then
     REPO_URL_WITH_TOKEN=$(echo "${GITHUB_REPO_URL}" | sed "s|https://|https://${GITHUB_TOKEN}@|")
-    git clone --depth 1 --branch "${GITHUB_BRANCH}" "${REPO_URL_WITH_TOKEN}" "${CLONE_DIR}"
+    GIT_URL="${REPO_URL_WITH_TOKEN}"
 else
-    git clone --depth 1 --branch "${GITHUB_BRANCH}" "${GITHUB_REPO_URL}" "${CLONE_DIR}"
+    GIT_URL="${GITHUB_REPO_URL}"
 fi
 
+# Temporarily disable exit on error for retry loop
+set +e
+
+while [ ${CLONE_RETRY} -lt ${CLONE_ATTEMPTS} ]; do
+    CLONE_RETRY=$((CLONE_RETRY + 1))
+    echo "Attempt ${CLONE_RETRY}/${CLONE_ATTEMPTS}..."
+    
+    if git clone --depth 1 --branch "${GITHUB_BRANCH}" "${GIT_URL}" "${CLONE_DIR}"; then
+        echo '✓ Repository cloned'
+        set -e  # Re-enable exit on error
+        break
+    else
+        if [ ${CLONE_RETRY} -lt ${CLONE_ATTEMPTS} ]; then
+            echo "⚠ Clone failed, retrying in 5 seconds..."
+            sleep 5
+            rm -rf "${CLONE_DIR}"
+        else
+            echo '✗ Error: Failed to clone repository after ${CLONE_ATTEMPTS} attempts'
+            echo '  Last error was connection reset - possible causes:'
+            echo '  - Network timeout or MTU issues'
+            echo '  - Proxy or firewall blocking HTTPS'
+            echo '  - GitHub rate limiting'
+            set -e
+            exit 1
+        fi
+    fi
+done
+
 cd "${CLONE_DIR}"
-echo '✓ Repository cloned'
 
 if [ ! -d "${SOURCE_DIR}" ]; then
     echo "✗ Error: Source directory '${SOURCE_DIR}' not found"
