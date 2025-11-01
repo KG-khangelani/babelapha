@@ -1,0 +1,35 @@
+version: "1.0"
+# Qodana config for Python code in this repo. Pick the community linter to avoid license requirements.
+linter: jetbrains/qodana-python-community:latest
+
+# Use the recommended inspection profile.
+profile:
+  name: qodana.recommended
+
+# Optional: small bootstrap to speed up and avoid heavy installs.
+# Avoid installing heavyweight frameworks like Airflow in CI static analysis.
+bootstrap: |
+  python -V || true
+
+# Exclude non-source and heavy folders to keep analysis fast and stable in CI agents.
+exclude:
+  - name: "Exclude generated and vendor"
+    paths:
+      - ".git"
+      - ".idea"
+      - ".qodana"
+      - ".venv"
+      - "venv"
+      - "ci/**"
+      - "Documentation/**"
+      - "docker/**/Dockerfile*"
+      - "docker/**/dockerfile*"
+      - "docker/**/README.md"
+      - "docker/**/clamav/**"
+      - "docker/**/validate/**"
+      - "docker/**/transcode/**"
+      - "pipelines/pachyderm/**"
+
+# Optional: set threshold so the step doesn't fail the pipeline while we stabilize rules.
+# Raise to 0 later to fail the build on any problem.
+failThreshold: 1000000
