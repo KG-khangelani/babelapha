@@ -111,3 +111,5 @@ kubectl logs -n airflow -l component=scheduler --tail=100
 ```
 
 If your deployment uses different labels for the scheduler pod (e.g., `app.kubernetes.io/component=scheduler`), set `AIRFLOW_POD_LABEL` accordingly. The sync script will try common selectors automatically if not set.
+
+If the scheduler is Pending/Terminating and no Running pod is available, the sync script will fall back to creating a temporary pod that mounts the DAGs PVC and copies files there directly. You can override the detected PVC name with `AIRFLOW_DAGS_PVC`.

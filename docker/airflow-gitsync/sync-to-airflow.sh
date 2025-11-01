@@ -92,40 +92,98 @@ if [ -z "${SCHEDULER_POD}" ]; then
     exit 1
 fi
 
-echo "✓ Found processor pod: ${SCHEDULER_POD}"
+echo "✓ Selected scheduler pod: ${SCHEDULER_POD}"
+
+# Determine if we can copy directly to a running scheduler container
+PHASE=$(kubectl get pod -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -o jsonpath='{.status.phase}' 2>/dev/null || true)
+COPY_TARGET_MODE="pod"
+COPY_POD_NAME="${SCHEDULER_POD}"
+
+if [ "${PHASE}" != "Running" ]; then
+    echo "⚠ Scheduler pod phase is '${PHASE}'. Falling back to syncing via a temporary pod mounting the DAGs PVC."
+    # Autodetect DAGs PVC (override with AIRFLOW_DAGS_PVC if set)
+    if [ -z "${AIRFLOW_DAGS_PVC:-}" ]; then
+        AIRFLOW_DAGS_PVC=$(kubectl get pvc -n ${AIRFLOW_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep -E '^airflow-dags$|dags' | head -n1)
+    fi
+    if [ -z "${AIRFLOW_DAGS_PVC:-}" ]; then
+        echo "✗ Error: Could not determine DAGs PVC name. Set AIRFLOW_DAGS_PVC."
+        exit 1
+    fi
+    echo "  Using DAGs PVC: ${AIRFLOW_DAGS_PVC}"
+
+    SYNC_POD="airflow-dags-sync-$(date +%s)"
+    cat <<EOF | kubectl apply -n ${AIRFLOW_NAMESPACE} -f -
+apiVersion: v1
+kind: Pod
+metadata:
+    name: ${SYNC_POD}
+    labels:
+        app: airflow-dags-sync
+spec:
+    restartPolicy: Never
+    containers:
+    - name: sync
+        image: alpine:3.19
+        command: ['sh','-c','sleep 600']
+        volumeMounts:
+        - name: dags
+            mountPath: ${DAGS_FOLDER}
+    volumes:
+    - name: dags
+        persistentVolumeClaim:
+            claimName: ${AIRFLOW_DAGS_PVC}
+EOF
+
+    echo "  Waiting for sync pod to be ready..."
+    kubectl wait --for=condition=Ready -n ${AIRFLOW_NAMESPACE} pod/${SYNC_POD} --timeout=60s || {
+        echo "✗ Sync pod did not become ready"
+        kubectl logs -n ${AIRFLOW_NAMESPACE} ${SYNC_POD} || true
+        exit 1
+    }
+    COPY_TARGET_MODE="sync-pod"
+    COPY_POD_NAME="${SYNC_POD}"
+fi
 
 # Sync DAG files
 echo ''
-echo "Ensuring DAGs directory exists in pod: ${DAGS_FOLDER}"
-kubectl exec -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -- mkdir -p ${DAGS_FOLDER} || true
-
-echo "Syncing DAGs to ${DAGS_FOLDER}..."
+echo "Syncing DAGs to ${DAGS_FOLDER} (mode: ${COPY_TARGET_MODE})..."
 DAG_COUNT=0
 for dag_file in "${SOURCE_PATH}"/*.py; do
     if [ -f "${dag_file}" ]; then
         DAG_NAME=$(basename "${dag_file}")
         echo "  → Copying ${DAG_NAME}"
-        
-        # Copy file directly to pod
-        kubectl cp "${dag_file}" "${AIRFLOW_NAMESPACE}/${SCHEDULER_POD}:${DAGS_FOLDER}/${DAG_NAME}"
-        
+        kubectl exec -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} -- mkdir -p ${DAGS_FOLDER} || true
+        kubectl cp "${dag_file}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/${DAG_NAME}"
         DAG_COUNT=$((DAG_COUNT + 1))
     fi
 done
 
 if [ ${DAG_COUNT} -eq 0 ]; then
     echo '✗ Warning: No DAG files found to sync'
+    # Cleanup temp pod if created
+    if [ "${COPY_TARGET_MODE}" = "sync-pod" ]; then
+        kubectl delete pod -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} --wait=false || true
+    fi
     exit 1
+fi
+
+if [ "${COPY_TARGET_MODE}" = "sync-pod" ]; then
+    echo "  Cleaning up sync pod..."
+    kubectl delete pod -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} --wait=false || true
 fi
 
 echo ''
 echo "✓ Successfully synced ${DAG_COUNT} DAG(s) to Airflow!"
 echo ''
-echo 'Triggering DAG refresh...'
-kubectl exec -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -- airflow dags list || true
+echo 'Triggering DAG refresh (if scheduler is running)...'
+if [ "${PHASE}" = "Running" ]; then
+    kubectl exec -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -- airflow dags list || true
+else
+    echo "  Scheduler not running; will be picked up when it starts."
+fi
 
 echo ''
-echo '✓ Sync complete. Check Airflow UI for new DAGs.'
+echo '✓ Sync complete. Check Airflow UI for new DAGs when scheduler is healthy.'
 echo "  Build: #${BUILD_NUMBER}"
 echo "  Commit: ${BUILD_VCS_NUMBER}"
 
