@@ -1,9 +1,9 @@
 # file: docker/clamav/Dockerfile
 FROM clamav/clamav:latest
 RUN apk add --no-cache python3 py3-pip curl jq
-# pachctl (linux amd64)
-RUN curl -L https://github.com/pachyderm/pachyderm/releases/latest/download/pachctl_2.7.0_linux_amd64.tar.gz \
-  | tar -xz && mv pachctl_*/pachctl /usr/local/bin/pachctl && rm -rf pachctl_*
+# pachctl (linux amd64) - use specific version
+RUN curl -L -o /usr/local/bin/pachctl https://github.com/pachyderm/pachyderm/releases/download/v2.8.0/pachctl_2.8.0_linux_amd64 \
+  && chmod +x /usr/local/bin/pachctl
 COPY pfs_move.py /app/pfs_move.py
 COPY scan.py /app/scan.py
 WORKDIR /app
