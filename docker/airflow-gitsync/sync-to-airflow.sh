@@ -6,7 +6,8 @@ echo ''
 
 WORKSPACE_DIR=${WORKSPACE_DIR:-/workspace}
 AIRFLOW_NAMESPACE=${AIRFLOW_NAMESPACE:-airflow}
-AIRFLOW_POD_LABEL=${AIRFLOW_POD_LABEL:-component=scheduler}
+# Try common label selectors; can be overridden by AIRFLOW_POD_LABEL
+AIRFLOW_POD_LABEL=${AIRFLOW_POD_LABEL:-}
 DAGS_FOLDER=${DAGS_FOLDER:-/opt/airflow/dags}
 SOURCE_DIR=${SOURCE_DIR:-pipelines/airflow/dags}
 BUILD_NUMBER=${BUILD_NUMBER:-1}
@@ -44,7 +45,9 @@ echo ''
 # Find Airflow scheduler pod
 echo 'Finding Airflow scheduler pod...'
 echo "  Namespace: ${AIRFLOW_NAMESPACE}"
-echo "  Label: ${AIRFLOW_POD_LABEL}"
+if [ -n "${AIRFLOW_POD_LABEL}" ]; then
+    echo "  Label (explicit): ${AIRFLOW_POD_LABEL}"
+fi
 
 if ! kubectl version --client > /dev/null 2>&1; then
     echo '✗ Error: kubectl not working'
@@ -60,10 +63,30 @@ kubectl get pods -n ${AIRFLOW_NAMESPACE} 2>&1 || {
     exit 1
 }
 
-SCHEDULER_POD=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${AIRFLOW_POD_LABEL} -o jsonpath='{.items[0].metadata.name}' 2>&1)
+SELECTORS=()
+if [ -n "${AIRFLOW_POD_LABEL}" ]; then
+    SELECTORS+=("${AIRFLOW_POD_LABEL}")
+fi
+SELECTORS+=(
+    "component=scheduler"
+    "app.kubernetes.io/component=scheduler"
+    "airflow-role=scheduler"
+    "role=scheduler"
+)
+
+SCHEDULER_POD=""
+for sel in "${SELECTORS[@]}"; do
+    echo "  Trying label selector: ${sel}"
+    name=$(kubectl get pods -n ${AIRFLOW_NAMESPACE} -l ${sel} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -n "${name}" ]; then
+        SCHEDULER_POD=${name}
+        AIRFLOW_POD_LABEL=${sel}
+        break
+    fi
+done
 
 if [ -z "${SCHEDULER_POD}" ]; then
-    echo "✗ Error: Could not find Airflow processor pod with label '${AIRFLOW_POD_LABEL}'"
+    echo "✗ Error: Could not find Airflow scheduler pod using known selectors"
     echo "  Available pods:"
     kubectl get pods -n ${AIRFLOW_NAMESPACE} -o custom-columns=NAME:.metadata.name,LABELS:.metadata.labels
     exit 1
@@ -73,6 +96,9 @@ echo "✓ Found processor pod: ${SCHEDULER_POD}"
 
 # Sync DAG files
 echo ''
+echo "Ensuring DAGs directory exists in pod: ${DAGS_FOLDER}"
+kubectl exec -n ${AIRFLOW_NAMESPACE} ${SCHEDULER_POD} -- mkdir -p ${DAGS_FOLDER} || true
+
 echo "Syncing DAGs to ${DAGS_FOLDER}..."
 DAG_COUNT=0
 for dag_file in "${SOURCE_PATH}"/*.py; do

@@ -109,3 +109,5 @@ kubectl exec -n airflow <scheduler-pod> -- airflow dags list
 ```bash
 kubectl logs -n airflow -l component=scheduler --tail=100
 ```
+
+If your deployment uses different labels for the scheduler pod (e.g., `app.kubernetes.io/component=scheduler`), set `AIRFLOW_POD_LABEL` accordingly. The sync script will try common selectors automatically if not set.

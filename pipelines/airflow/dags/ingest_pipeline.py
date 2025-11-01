@@ -29,7 +29,8 @@ def ingest_pipeline():
     # -------------------------------
     def base_env():
         return {
-            "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachderm:1600"),
+            # Fix default endpoint hostname typo (pachyderm)
+            "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600"),
             "PACH_S3_PREFIX": os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master"),
             "PFS_REPO": "media",
             "PFS_BRANCH": "master",

@@ -1,7 +1,7 @@
 # Airflow Pipelines
 
 This directory contains Airflow DAGs that orchestrate the media ingestion and
-processing workflows. The current focus is a single `media_ingestion` DAG that
+processing workflows. The current focus is a single `ingest_pipeline` DAG that
 models the high-level steps required to take a raw interview recording and
 produce a transcript with associated metadata.
 
@@ -22,7 +22,7 @@ produce a transcript with associated metadata.
 
 3. Trigger the DAG manually:
    ```bash
-   airflow dags trigger media_ingestion --conf '{"interview_id": "demo-interview"}'
+   airflow dags trigger ingest_pipeline --conf '{"id": "demo-id", "filename": "sample.mp4"}'
    ```
 
 The individual task implementations are placeholders. Replace them with real
