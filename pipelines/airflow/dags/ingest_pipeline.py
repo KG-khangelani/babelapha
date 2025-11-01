@@ -1,4 +1,4 @@
-from airflow.sdk import dag, task
+from airflow.decorators import dag, task
 from datetime import datetime, timedelta
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.cncf.kubernetes.secret import Secret
