@@ -63,7 +63,7 @@ def ingest_pipeline():
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="Never",  # Use local containerd image
+        image_pull_policy="IfNotPresent",  # Use local images if available
     )
 
     # -------------------------------
@@ -85,7 +85,7 @@ def ingest_pipeline():
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="Never",  # Use local containerd image
+        image_pull_policy="IfNotPresent",  # Use local images if available
     )
 
     # -------------------------------
@@ -119,7 +119,7 @@ def ingest_pipeline():
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="Never",  # Use local containerd image
+        image_pull_policy="IfNotPresent",  # Use local images if available
     )
 
     # -------------------------------
