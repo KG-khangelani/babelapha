@@ -52,19 +52,18 @@ def ingest_pipeline():
         task_id="virus_scan",
         name="clamav-scan",
         namespace="airflow",
-        image="alpine:latest",  # Placeholder - replace with actual image
-        cmds=["sh", "-c"],
-        arguments=["echo 'Virus scan placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
+        image="clamav:latest",
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
             "SRC_PATH": "/incoming/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
+            "DEST_PATH": "/clean/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
         },
         secrets=[pach_token],
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="IfNotPresent",
+        image_pull_policy="Never",  # Use local containerd image
     )
 
     # -------------------------------
@@ -74,19 +73,19 @@ def ingest_pipeline():
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
-        image="alpine:latest",  # Placeholder - replace with actual image
-        cmds=["sh", "-c"],
-        arguments=["echo 'Validation placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
+        image="validate:latest",
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
-            "SRC_PATH": "/scanned/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
+            "SRC_PATH": "/clean/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
+            "DEST_PATH": "/validated/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
+            "REPORT_PATH": "/reports/{{ dag_run.conf.get('id', 'default-id') }}/validation.json",
         },
         secrets=[pach_token],
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="IfNotPresent",
+        image_pull_policy="Never",  # Use local containerd image
     )
 
     # -------------------------------
@@ -108,19 +107,19 @@ def ingest_pipeline():
         task_id="transcode",
         name="transcode",
         namespace="airflow",
-        image="alpine:latest",  # Placeholder - replace with actual image
-        cmds=["sh", "-c"],
-        arguments=["echo 'Transcode placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
+        image="transcode:latest",
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
             "SRC_PATH": "/validated/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
+            "DEST_PATH": "/transcoded/{{ dag_run.conf.get('id', 'default-id') }}",
+            "OUTPUT_FORMATS": "hls,dash",
         },
         secrets=[pach_token],
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
-        image_pull_policy="IfNotPresent",
+        image_pull_policy="Never",  # Use local containerd image
     )
 
     # -------------------------------
