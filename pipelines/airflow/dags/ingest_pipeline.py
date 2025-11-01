@@ -51,15 +51,20 @@ def ingest_pipeline():
     virus_scan = KubernetesPodOperator(
         task_id="virus_scan",
         name="clamav-scan",
-        image="ghcr.io/you/clamav:latest",
+        namespace="airflow",
+        image="alpine:latest",  # Placeholder - replace with actual image
+        cmds=["sh", "-c"],
+        arguments=["echo 'Virus scan placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
         env_vars={
             **base_env(),
-            "OBJ_ID": "{{ dag_run.conf['id'] }}",
-            "SRC_PATH": "/incoming/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
+            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
+            "SRC_PATH": "/incoming/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
         },
         secrets=[pach_token],
+        in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
+        image_pull_policy="IfNotPresent",
     )
 
     # -------------------------------
@@ -68,15 +73,20 @@ def ingest_pipeline():
     validate_media = KubernetesPodOperator(
         task_id="validate_media",
         name="validate-media",
-        image="ghcr.io/you/validate:latest",
+        namespace="airflow",
+        image="alpine:latest",  # Placeholder - replace with actual image
+        cmds=["sh", "-c"],
+        arguments=["echo 'Validation placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
         env_vars={
             **base_env(),
-            "OBJ_ID": "{{ dag_run.conf['id'] }}",
-            "SRC_PATH": "/scanned/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
+            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
+            "SRC_PATH": "/scanned/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
         },
         secrets=[pach_token],
+        in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
+        image_pull_policy="IfNotPresent",
     )
 
     # -------------------------------
@@ -97,15 +107,20 @@ def ingest_pipeline():
     transcode = KubernetesPodOperator(
         task_id="transcode",
         name="transcode",
-        image="ghcr.io/you/transcode:latest",
+        namespace="airflow",
+        image="alpine:latest",  # Placeholder - replace with actual image
+        cmds=["sh", "-c"],
+        arguments=["echo 'Transcode placeholder - OBJ_ID:' $OBJ_ID 'SRC_PATH:' $SRC_PATH && sleep 2"],
         env_vars={
             **base_env(),
-            "OBJ_ID": "{{ dag_run.conf['id'] }}",
-            "SRC_PATH": "/validated/{{ dag_run.conf['id'] }}/{{ dag_run.conf['filename'] }}",
+            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
+            "SRC_PATH": "/validated/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
         },
         secrets=[pach_token],
+        in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=True,
+        image_pull_policy="IfNotPresent",
     )
 
     # -------------------------------
