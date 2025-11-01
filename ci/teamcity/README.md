@@ -44,3 +44,40 @@ Kubernetes agents note:
    must have access to a Docker daemon (DinD sidecar with `--privileged`, or a
    Docker/Podman socket). If your Kubernetes agent image doesn't provide this,
    either add a Docker-enabled agent or use Qodana Cloud with a `QODANA_TOKEN`.
+
+## Troubleshooting Qodana
+
+### Empty Results or Exit Code 137 (OOMKilled)
+
+**Symptom**: Qodana step completes quickly with empty artifact containing only directory scaffolding; agent logs show container terminated with exit code 137.
+
+**Root Cause**: The Qodana container exceeds memory limits during Python interpreter configuration and skeleton generation. Kubernetes OOMKiller terminates the container before it can produce results.
+
+**Solution**:
+
+1. **Increase memory allocation** in the TeamCity Qodana build step:
+   - Navigate to Build Configuration → Steps → Qodana → Docker Settings
+   - Add to "Additional docker run arguments": `--memory=4g --memory-swap=4g`
+   - For larger projects, use 6GB+ (`--memory=6g --memory-swap=6g`)
+
+2. **Verify Kubernetes pod limits**:
+
+   ```bash
+   kubectl -n teamcity describe pod <agent-pod-name>
+   kubectl -n teamcity top pod <agent-pod-name>
+   ```
+
+3. **Optimize `qodana.yaml`**:
+   - Ensure `bootstrap: minimal` is set (reduces memory footprint)
+   - Add heavy directories to `exclude` list (docker/, ci/, pachyderm/, etc.)
+
+4. **Monitor the run**:
+
+   ```bash
+   kubectl -n teamcity logs -f <agent-pod-name>
+   kubectl -n teamcity exec <agent-pod-name> -- docker stats
+   ```
+
+### License or Image Issues
+
+If you see "license" errors or "unsupported linter" messages, ensure `qodana.yaml` specifies `linter: jetbrains/qodana-python-community:latest` (the free community edition).
