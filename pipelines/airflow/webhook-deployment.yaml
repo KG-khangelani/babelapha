@@ -69,11 +69,8 @@ spec:
               name: pachyderm-webhook-config
               key: DEBUG
         command:
-          - sh
-          - -c
-          - |
-            pip install flask requests --quiet && \
-            python /app/webhook_listener.py
+          - python3
+          - /app/webhook_listener_stdlib.py
         volumeMounts:
         - name: webhook-code
           mountPath: /app
