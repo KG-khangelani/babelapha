@@ -61,10 +61,11 @@ def ingest_pipeline():
         return {
             'object_id': object_id,
             'filename': filename,
-            # MinIO paths (S3-compatible storage)
+            # MinIO bucket
             's3_bucket': S3_BUCKET,
-            's3_input_path': f"{S3_BUCKET}/input/{object_id}/{filename}",
-            's3_output_path': f"{S3_BUCKET}/output/{object_id}",
+            # S3 keys (without bucket name - just the path inside bucket)
+            's3_input_key': f"input/{object_id}/{filename}",
+            's3_output_key': f"output/{object_id}",
             # Local paths for processing
             'local_input_path': f"/tmp/input/{filename}",
             'local_work_dir': f"/tmp/work/{object_id}",
@@ -90,7 +91,7 @@ def ingest_pipeline():
             """
 # Get parameters from XCom
 S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
-S3_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
+S3_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_key'] }}"
 LOCAL_PATH="{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_input_path'] }}"
 WORK_DIR="{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_work_dir'] }}"
 MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
@@ -281,7 +282,7 @@ fi
 OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
 OUTPUT_DIR="{{ task_instance.xcom_pull(task_ids='validate_inputs')['output_dir'] }}"
 S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
-S3_OUTPUT_PATH="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_output_path'] }}"
+S3_OUTPUT_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_output_key'] }}"
 MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
 MINIO_ACCESS_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
 MINIO_SECRET_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
@@ -309,7 +310,7 @@ echo "[upload] Uploading HLS files..."
 for file in "$OUTPUT_DIR/hls"/*; do
     if [ -f "$file" ]; then
         FILENAME=$(basename "$file")
-        S3_KEY="$S3_OUTPUT_PATH/hls/$FILENAME"
+        S3_KEY="$S3_OUTPUT_KEY/hls/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
             --endpoint-url="$MINIO_ENDPOINT" || {
             echo "[upload] Failed to upload $FILENAME"
@@ -324,7 +325,7 @@ echo "[upload] Uploading DASH files..."
 for file in "$OUTPUT_DIR/dash"/*; do
     if [ -f "$file" ]; then
         FILENAME=$(basename "$file")
-        S3_KEY="$S3_OUTPUT_PATH/dash/$FILENAME"
+        S3_KEY="$S3_OUTPUT_KEY/dash/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
             --endpoint-url="$MINIO_ENDPOINT" || {
             echo "[upload] Failed to upload $FILENAME"
@@ -334,7 +335,7 @@ for file in "$OUTPUT_DIR/dash"/*; do
     fi
 done
 
-echo "[upload] Successfully uploaded all results to $S3_OUTPUT_PATH"
+echo "[upload] Successfully uploaded all results to $S3_OUTPUT_KEY"
 exit 0
 """
         ],
