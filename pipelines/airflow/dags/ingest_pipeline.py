@@ -192,20 +192,30 @@ fi
         cmd_script="""
 FILENAME="{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}"
 OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
+S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
+S3_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_key'] }}"
+MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
+MINIO_ACCESS_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
+MINIO_SECRET_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
 
 echo "[transcode] Starting transcoding to HLS + DASH"
 
-# Check input file exists
+mkdir -p /tmp/input /tmp/output/$OBJECT_ID/hls /tmp/output/$OBJECT_ID/dash
+
+# Download input file from MinIO using curl (ffmpeg/jrottenberg image likely has no aws-cli)
+echo "[transcode] Downloading input file from MinIO: $S3_KEY"
+curl -X GET \
+    -u "$MINIO_ACCESS_KEY:$MINIO_SECRET_KEY" \
+    -o "/tmp/input/$FILENAME" \
+    "$MINIO_ENDPOINT/$S3_BUCKET/$S3_KEY"
+
 if [ ! -f "/tmp/input/$FILENAME" ]; then
-    echo "[transcode] ERROR: Input file not found: /tmp/input/$FILENAME"
-    ls -la /tmp/input/ 2>&1 || echo "Cannot list /tmp/input"
+    echo "[transcode] ERROR: Failed to download input file from MinIO"
     exit 1
 fi
 
 INPUT_SIZE=$(stat -f%z "/tmp/input/$FILENAME" 2>/dev/null || stat -c%s "/tmp/input/$FILENAME" 2>/dev/null || echo "unknown")
-echo "[transcode] Input file size: $INPUT_SIZE bytes"
-
-mkdir -p /tmp/output/$OBJECT_ID/hls /tmp/output/$OBJECT_ID/dash
+echo "[transcode] Input file downloaded, size: $INPUT_SIZE bytes"
 
 # HLS Transcoding - capture full output for debugging
 echo "[transcode] Creating HLS output..."
