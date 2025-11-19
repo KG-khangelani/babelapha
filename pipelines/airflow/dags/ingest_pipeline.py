@@ -82,61 +82,50 @@ def ingest_pipeline():
         task_id="download_from_pachyderm",
         name="download-pachyderm",
         namespace="airflow",
-        image="python:3.11-slim",
+        image="amazon/aws-cli:latest",
         image_pull_policy="Always",
-        cmds=["bash"],
+        cmds=["sh"],
         arguments=[
             "-c",
             """
-set -e
-# Install boto3
-pip install boto3 -q
-
-python3 << 'EOF'
-import sys
-from pathlib import Path
-import boto3
-
 # Get parameters from XCom
-s3_bucket = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
-s3_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
-local_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_input_path'] }}"
-work_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_work_dir'] }}"
-minio_endpoint = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
-minio_access_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
-minio_secret_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
+S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
+S3_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
+LOCAL_PATH="{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_input_path'] }}"
+WORK_DIR="{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_work_dir'] }}"
+MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
+MINIO_ACCESS_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
+MINIO_SECRET_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
 
 # Create directories
-Path(work_dir).mkdir(parents=True, exist_ok=True)
-Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+mkdir -p "$WORK_DIR"
+mkdir -p "$(dirname "$LOCAL_PATH")"
 
-print(f"[download] Downloading from MinIO")
-print(f"  Endpoint: {minio_endpoint}")
-print(f"  Bucket: {s3_bucket}")
-print(f"  Key: {s3_key}")
-print(f"  Local: {local_path}")
+echo "[download] Downloading from MinIO"
+echo "  Endpoint: $MINIO_ENDPOINT"
+echo "  Bucket: $S3_BUCKET"
+echo "  Key: $S3_KEY"
+echo "  Local: $LOCAL_PATH"
 
-try:
-    # Connect to MinIO (S3-compatible)
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=minio_endpoint,
-        aws_access_key_id=minio_access_key,
-        aws_secret_access_key=minio_secret_key,
-        use_ssl=False,
-    )
-    
-    # Download file
-    s3_client.download_file(s3_bucket, s3_key, local_path)
-    print(f"[download] Successfully downloaded: {local_path}")
-    
-except Exception as e:
-    print(f"[download] ERROR: {str(e)}")
-    print(f"[download] Verify MinIO credentials and bucket/key exist")
-    sys.exit(1)
+# Download using AWS CLI with MinIO endpoint
+export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
 
-sys.exit(0)
-EOF
+aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "$LOCAL_PATH" \
+    --endpoint-url="$MINIO_ENDPOINT" \
+    --no-sign-request || {
+    echo "[download] Retrying with signature..."
+    aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "$LOCAL_PATH" \
+        --endpoint-url="$MINIO_ENDPOINT"
+}
+
+if [ -f "$LOCAL_PATH" ]; then
+    echo "[download] Successfully downloaded: $LOCAL_PATH"
+    exit 0
+else
+    echo "[download] ERROR: Failed to download file"
+    exit 1
+fi
 """
         ],
         in_cluster=True,
@@ -282,76 +271,71 @@ fi
         task_id="upload_results",
         name="upload-results",
         namespace="airflow",
-        image="python:3.11-slim",
+        image="amazon/aws-cli:latest",
         image_pull_policy="Always",
-        cmds=["bash"],
+        cmds=["sh"],
         arguments=[
             "-c",
             """
-set -e
-# Install boto3
-pip install boto3 -q
+# Get parameters from XCom
+OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
+OUTPUT_DIR="{{ task_instance.xcom_pull(task_ids='validate_inputs')['output_dir'] }}"
+S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
+S3_OUTPUT_PATH="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_output_path'] }}"
+MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
+MINIO_ACCESS_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
+MINIO_SECRET_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
 
-python3 << 'EOF'
-import sys
-from pathlib import Path
-import boto3
-
-object_id = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
-output_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['output_dir'] }}"
-s3_bucket = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
-s3_output_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_output_path'] }}"
-minio_endpoint = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
-minio_access_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
-minio_secret_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
-
-print(f"[upload] Preparing to upload results for object_id={object_id}")
-print(f"[upload] Output directory: {output_dir}")
+echo "[upload] Preparing to upload results for object_id=$OBJECT_ID"
+echo "[upload] Output directory: $OUTPUT_DIR"
 
 # Verify output files exist
-hls_manifest = Path(f"{output_dir}/hls/playlist.m3u8")
-dash_manifest = Path(f"{output_dir}/dash/manifest.mpd")
+if [ ! -f "$OUTPUT_DIR/hls/playlist.m3u8" ] || [ ! -f "$OUTPUT_DIR/dash/manifest.mpd" ]; then
+    echo "[upload] ERROR: Output files not found"
+    echo "[upload] HLS exists: $([ -f "$OUTPUT_DIR/hls/playlist.m3u8" ] && echo 'true' || echo 'false')"
+    echo "[upload] DASH exists: $([ -f "$OUTPUT_DIR/dash/manifest.mpd" ] && echo 'true' || echo 'false')"
+    exit 1
+fi
 
-if not (hls_manifest.exists() and dash_manifest.exists()):
-    print(f"[upload] ERROR: Output files not found")
-    print(f"[upload] HLS exists: {hls_manifest.exists()}")
-    print(f"[upload] DASH exists: {dash_manifest.exists()}")
-    sys.exit(1)
+echo "[upload] Found HLS: $OUTPUT_DIR/hls/playlist.m3u8"
+echo "[upload] Found DASH: $OUTPUT_DIR/dash/manifest.mpd"
 
-print(f"[upload] Found HLS: {hls_manifest}")
-print(f"[upload] Found DASH: {dash_manifest}")
+# Setup AWS CLI credentials
+export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
 
-try:
-    # Connect to MinIO
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=minio_endpoint,
-        aws_access_key_id=minio_access_key,
-        aws_secret_access_key=minio_secret_key,
-        use_ssl=False,
-    )
-    
-    # Upload HLS files
-    hls_dir = Path(f"{output_dir}/hls")
-    for file in hls_dir.glob("*"):
-        s3_key = f"{s3_output_path}/hls/{file.name}"
-        s3_client.upload_file(str(file), s3_bucket, s3_key)
-        print(f"[upload] Uploaded HLS: {s3_key}")
-    
-    # Upload DASH files
-    dash_dir = Path(f"{output_dir}/dash")
-    for file in dash_dir.glob("*"):
-        s3_key = f"{s3_output_path}/dash/{file.name}"
-        s3_client.upload_file(str(file), s3_bucket, s3_key)
-        print(f"[upload] Uploaded DASH: {s3_key}")
-    
-    print(f"[upload] Successfully uploaded all results to {s3_output_path}")
-    sys.exit(0)
-    
-except Exception as e:
-    print(f"[upload] ERROR uploading to S3: {str(e)}")
-    sys.exit(1)
-EOF
+# Upload HLS files
+echo "[upload] Uploading HLS files..."
+for file in "$OUTPUT_DIR/hls"/*; do
+    if [ -f "$file" ]; then
+        FILENAME=$(basename "$file")
+        S3_KEY="$S3_OUTPUT_PATH/hls/$FILENAME"
+        aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
+            --endpoint-url="$MINIO_ENDPOINT" || {
+            echo "[upload] Failed to upload $FILENAME"
+            exit 1
+        }
+        echo "[upload] Uploaded HLS: $S3_KEY"
+    fi
+done
+
+# Upload DASH files
+echo "[upload] Uploading DASH files..."
+for file in "$OUTPUT_DIR/dash"/*; do
+    if [ -f "$file" ]; then
+        FILENAME=$(basename "$file")
+        S3_KEY="$S3_OUTPUT_PATH/dash/$FILENAME"
+        aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
+            --endpoint-url="$MINIO_ENDPOINT" || {
+            echo "[upload] Failed to upload $FILENAME"
+            exit 1
+        }
+        echo "[upload] Uploaded DASH: $S3_KEY"
+    fi
+done
+
+echo "[upload] Successfully uploaded all results to $S3_OUTPUT_PATH"
+exit 0
 """
         ],
         in_cluster=True,
