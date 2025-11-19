@@ -29,8 +29,12 @@ S3_BUCKET = "pachyderm"
 
 default_args = dict(retries=1)
 
-def _create_kpo_task(task_id, image, cmd_script, name_prefix="task"):
-    """Factory function to create KubernetesPodOperator tasks with deferred import."""
+def _create_kpo_task(task_id, image, cmd_script, name_prefix="task", startup_timeout_seconds=300):
+    """Factory function to create KubernetesPodOperator tasks with deferred import.
+    
+    Args:
+        startup_timeout_seconds: How long to wait for pod to start (default 300s = 5 minutes)
+    """
     # Import ONLY when called, not at module level
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     
@@ -46,6 +50,7 @@ def _create_kpo_task(task_id, image, cmd_script, name_prefix="task"):
         get_logs=True,
         is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
+        startup_timeout_seconds=startup_timeout_seconds,
     )
 
 @dag(
@@ -134,6 +139,7 @@ fi
         task_id="virus_scan",
         image="clamav/clamav:latest",
         name_prefix="scan",
+        startup_timeout_seconds=300,  # ClamAV image takes time to start
         cmd_script="""
 FILENAME="{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}"
 
