@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trigger-teamcity-build4
+  namespace: teamcity
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command:
+    - sh
+    - -c
+    - |
+      cat > /tmp/build.xml << 'EOF'
+      <build><buildType id="Babelapha_AirflowGitSync"/></build>
+      EOF
+      curl -X POST \
+        -H "Content-Type: application/xml" \
+        -H "Accept: application/json" \
+        -u ":6276342602193470220" \
+        -d @/tmp/build.xml \
+        http://teamcity-server:8111/app/rest/buildQueue

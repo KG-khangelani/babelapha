@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trigger-dag-config
+  namespace: airflow
+data:
+  trigger.sh: |
+    #!/bin/bash
+    curl -X POST \
+      http://airflow-api-server:8080/api/v1/dags/ingest_pipeline/dagRuns \
+      -H "Content-Type: application/json" \
+      -d '{"conf": {"id": "test-media-003", "filename": "test-video.mp4"}}'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trigger-dag-run
+  namespace: airflow
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["sh", "/scripts/trigger.sh"]
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+  volumes:
+  - name: scripts
+    configMap:
+      name: trigger-dag-config
+      defaultMode: 0755

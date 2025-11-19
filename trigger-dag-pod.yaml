@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trigger-dag-script
+  namespace: airflow
+data:
+  trigger.py: |
+    #!/usr/bin/env python3
+    import requests
+    import json
+    
+    api_url = "http://airflow-api-server:8080/api/v1/dags/ingest_pipeline/dagRuns"
+    conf = {"id": "test-media-001", "filename": "sample-video.mp4"}
+    
+    response = requests.post(api_url, json={"conf": conf}, headers={"Content-Type": "application/json"})
+    print(f"Status Code: {response.status_code}")
+    print(f"Response: {response.text}")
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dag-trigger-test
+  namespace: airflow
+spec:
+  restartPolicy: Never
+  containers:
+  - name: python
+    image: python:3.11-slim
+    command: ["bash", "-c"]
+    args:
+    - |
+      pip install -q requests
+      python /scripts/trigger.py
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+  volumes:
+  - name: scripts
+    configMap:
+      name: trigger-dag-script
