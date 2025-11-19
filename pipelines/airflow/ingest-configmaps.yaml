@@ -1,0 +1,261 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingest-clamav-script
+  namespace: airflow
+data:
+  scan.py: |
+    import os, json, subprocess, sys, pathlib
+    from datetime import datetime
+    from utils.pfs_move import move_path
+
+    PACH_TOKEN = os.environ.get("PACH_TOKEN", "")
+    if PACH_TOKEN:
+        os.environ["PACHTOKEN"] = PACH_TOKEN
+
+    SRC_PATH   = os.environ["SRC_PATH"]     # e.g. /incoming/1234/file.mp4
+    ID         = os.environ["OBJ_ID"]       # e.g. 1234
+    FILENAME   = os.path.basename(SRC_PATH)
+    TMP        = "/work/in"
+    pathlib.Path("/work").mkdir(exist_ok=True)
+
+    def run(*args):
+        """Run command and return result; log errors."""
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"[ERROR] Command failed: {' '.join(args)}", file=sys.stderr)
+            print(f"STDERR: {r.stderr}", file=sys.stderr)
+        return r
+
+    # Fetch via S3 gateway
+    def s3cp(src, dst):
+        endpoint = os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600")
+        return run("aws", "--endpoint-url", endpoint, "s3", "cp", src, dst)
+
+    # Write JSON report back to PFS (reports don't duplicate the big media file)
+    def put_report(obj):
+        report_path = f"/reports/{ID}/clamav.json"
+        tmp = "/work/report.json"
+        with open(tmp, "w") as f:
+            json.dump(obj, f, indent=2)
+        return run("pachctl", "put", "file", "media@master:" + report_path, "-f", tmp)
+
+    # Main
+    print(f"[clamav] Scanning {SRC_PATH}")
+    s3_url = os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master") + SRC_PATH
+    print(f"[clamav] Downloading from S3: {s3_url}")
+
+    # Download file
+    s3cp(s3_url, TMP + "/" + FILENAME)
+
+    # Scan
+    print(f"[clamav] Running freshclam (update signatures)...")
+    r = run("freshclam", "--no-warnings")
+    print(f"[clamav] Running clamscan...")
+    r = run("clamscan", "-r", "--json", TMP)
+    scan_output = r.stdout
+    print(f"[clamav] Scan output:\n{scan_output}")
+
+    # Parse JSON
+    try:
+        result = json.loads(scan_output)
+    except:
+        result = {"error": "Failed to parse clamscan JSON output"}
+
+    # Check for infections
+    infected = result.get("Infected", 0)
+    if infected > 0:
+        print(f"[clamav] VIRUS DETECTED! Moving to quarantine...")
+        move_path("/incoming", f"/incoming/{ID}", f"/quarantine/{ID}", ID)
+        result["status"] = "quarantined"
+    else:
+        print(f"[clamav] No virus detected. Moving to clean...")
+        move_path("/incoming", f"/incoming/{ID}", f"/clean/{ID}", ID)
+        result["status"] = "clean"
+
+    # Report
+    put_report(result)
+    print(f"[clamav] Scan complete. Status: {result['status']}")
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingest-ffmpeg-script
+  namespace: airflow
+data:
+  validate.py: |
+    import os, json, subprocess, sys, pathlib
+    from datetime import datetime
+    from utils.pfs_move import move_path
+
+    PACH_TOKEN = os.environ.get("PACH_TOKEN", "")
+    if PACH_TOKEN:
+        os.environ["PACHTOKEN"] = PACH_TOKEN
+
+    SRC_PATH   = os.environ["SRC_PATH"]
+    ID         = os.environ["OBJ_ID"]
+    REPORT_PATH = os.environ.get("REPORT_PATH", f"/reports/{ID}/validation.json")
+    FILENAME   = os.path.basename(SRC_PATH)
+    TMP        = "/work/validate"
+    pathlib.Path("/work").mkdir(exist_ok=True)
+
+    def run(*args):
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"[ERROR] Command failed: {' '.join(args)}", file=sys.stderr)
+            print(f"STDERR: {r.stderr}", file=sys.stderr)
+        return r
+
+    def s3cp(src, dst):
+        endpoint = os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600")
+        return run("aws", "--endpoint-url", endpoint, "s3", "cp", src, dst)
+
+    def put_report(path, data):
+        tmp = "/work/report.json"
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        return run("pachctl", "put", "file", f"media@master:{path}", "-f", tmp)
+
+    print(f"[validate] Validating {SRC_PATH}")
+    s3_url = os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master") + SRC_PATH
+    
+    # Download file
+    s3cp(s3_url, TMP + "/" + FILENAME)
+
+    # Run FFprobe
+    print(f"[validate] Running ffprobe...")
+    r = run("ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", TMP + "/" + FILENAME)
+    probe_data = json.loads(r.stdout) if r.returncode == 0 else {"error": "ffprobe failed"}
+
+    # Run MediaInfo (if available)
+    print(f"[validate] Running mediainfo...")
+    r = run("mediainfo", "--Output=JSON", TMP + "/" + FILENAME)
+    mediainfo_data = json.loads(r.stdout) if r.returncode == 0 else {"error": "mediainfo failed"}
+
+    validation_result = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "file": FILENAME,
+        "ffprobe": probe_data,
+        "mediainfo": mediainfo_data,
+    }
+
+    # Move to validated directory
+    print(f"[validate] Moving to validated directory...")
+    move_path("/clean", f"/clean/{ID}", f"/validated/{ID}", ID)
+
+    # Report
+    put_report(REPORT_PATH, validation_result)
+    print(f"[validate] Validation complete")
+
+  transcode.py: |
+    import os, json, subprocess, sys, pathlib
+    from datetime import datetime
+    from utils.pfs_move import move_path
+
+    PACH_TOKEN = os.environ.get("PACH_TOKEN", "")
+    if PACH_TOKEN:
+        os.environ["PACHTOKEN"] = PACH_TOKEN
+
+    SRC_PATH   = os.environ["SRC_PATH"]
+    DEST_PATH  = os.environ["DEST_PATH"]
+    ID         = os.environ["OBJ_ID"]
+    FORMATS    = os.environ.get("OUTPUT_FORMATS", "hls").split(",")
+    FILENAME   = os.path.basename(SRC_PATH)
+    TMP        = "/work/transcode"
+    pathlib.Path(TMP).mkdir(exist_ok=True, parents=True)
+
+    def run(*args):
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"[ERROR] Command failed: {' '.join(args)}", file=sys.stderr)
+            print(f"STDERR: {r.stderr}", file=sys.stderr)
+        return r
+
+    def s3cp(src, dst):
+        endpoint = os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600")
+        return run("aws", "--endpoint-url", endpoint, "s3", "cp", src, dst)
+
+    print(f"[transcode] Processing {SRC_PATH} -> {DEST_PATH}")
+    s3_url = os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master") + SRC_PATH
+    
+    # Download file
+    print(f"[transcode] Downloading from S3...")
+    s3cp(s3_url, TMP + "/" + FILENAME)
+
+    results = {}
+
+    # Generate HLS if requested
+    if "hls" in FORMATS:
+        print(f"[transcode] Generating HLS stream...")
+        hls_dir = TMP + "/hls"
+        pathlib.Path(hls_dir).mkdir(exist_ok=True)
+        r = run("ffmpeg", "-i", TMP + "/" + FILENAME, "-c:v", "h264", "-c:a", "aac",
+                "-f", "hls", "-hls_time", "10", "-hls_list_size", "0", hls_dir + "/playlist.m3u8")
+        results["hls"] = "success" if r.returncode == 0 else "failed"
+
+    # Generate DASH if requested
+    if "dash" in FORMATS:
+        print(f"[transcode] Generating DASH stream...")
+        dash_dir = TMP + "/dash"
+        pathlib.Path(dash_dir).mkdir(exist_ok=True)
+        r = run("ffmpeg", "-i", TMP + "/" + FILENAME, "-c:v", "h264", "-c:a", "aac",
+                "-f", "dash", dash_dir + "/manifest.mpd")
+        results["dash"] = "success" if r.returncode == 0 else "failed"
+
+    # Report outputs
+    print(f"[transcode] Results: {results}")
+    
+    # Move to transcoded directory
+    print(f"[transcode] Moving to transcoded directory...")
+    move_path("/validated", f"/validated/{ID}", DEST_PATH, ID)
+    
+    print(f"[transcode] Transcoding complete")
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingest-utils-script
+  namespace: airflow
+data:
+  pfs_move.py: |
+    """Utility to move files within Pachyderm PFS using pachctl"""
+    import subprocess
+    import sys
+
+    def move_path(old_prefix, old_path, new_prefix, obj_id):
+        """
+        Move a path from old_prefix to new_prefix in Pachyderm
+        
+        Args:
+            old_prefix: Source prefix (e.g., "/incoming")
+            old_path: Full source path (e.g., "/incoming/1234")
+            new_prefix: Destination prefix (e.g., "/clean")
+            obj_id: Object ID for reference
+        """
+        try:
+            # Copy from old to new location
+            cmd = ["pachctl", "cp", f"media@master:{old_path}", f"media@master:{new_prefix}/{obj_id}"]
+            print(f"[pfs_move] Running: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(f"[pfs_move] Error: {result.stderr}", file=sys.stderr)
+                return False
+            
+            # Delete old location
+            cmd_del = ["pachctl", "delete", "file", f"media@master:{old_path}"]
+            print(f"[pfs_move] Running: {' '.join(cmd_del)}")
+            result_del = subprocess.run(cmd_del, capture_output=True, text=True)
+            
+            if result_del.returncode != 0:
+                print(f"[pfs_move] Warning: Could not delete {old_path}: {result_del.stderr}")
+                # Don't fail if delete fails, as copy was successful
+            
+            print(f"[pfs_move] Moved {old_path} to {new_prefix}/{obj_id}")
+            return True
+            
+        except Exception as e:
+            print(f"[pfs_move] Exception: {e}", file=sys.stderr)
+            return False
