@@ -71,20 +71,22 @@ def ingest_pipeline():
         arguments=[
             "-c",
             """
-import os, sys, json
+import sys
 from pathlib import Path
 
-# Get parameters from XCom passed via environment
-s3_path = os.environ.get('XCM_S3_PATH', '')
-local_path = os.environ.get('XCM_LOCAL_PATH', '')
-work_dir = os.environ.get('XCM_WORK_DIR', '/tmp/work')
+# Hardcoded for now - in production, mount volume or use init container
+s3_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
+local_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_input_path'] }}"
+work_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_work_dir'] }}"
+
+print(f"[download] Parameters received:")
+print(f"  S3_PATH: {s3_path}")
+print(f"  LOCAL_PATH: {local_path}")
+print(f"  WORK_DIR: {work_dir}")
 
 # Create directories
 Path(work_dir).mkdir(parents=True, exist_ok=True)
-
 print(f"[download] Work directory created: {work_dir}")
-print(f"[download] S3_PATH={s3_path}")
-print(f"[download] LOCAL_PATH={local_path}")
 
 # TODO: Download from S3 using boto3
 # s3_client = boto3.client('s3', endpoint_url='http://minio:9000')
@@ -94,13 +96,6 @@ print("[download] Download would occur here (S3 credentials configured)")
 sys.exit(0)
 """
         ],
-        env={
-            'XCM_S3_PATH': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["s3_input_path"] }}',
-            'XCM_LOCAL_PATH': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_input_path"] }}',
-            'XCM_WORK_DIR': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_work_dir"] }}',
-            'MINIO_ACCESS_KEY': os.environ.get('MINIO_ACCESS_KEY', 'pachyderm'),
-            'MINIO_SECRET_KEY': os.environ.get('MINIO_SECRET_KEY', 'pachyderm'),
-        },
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=False,
@@ -250,11 +245,11 @@ fi
         arguments=[
             "-c",
             """
-import os, sys
+import sys
 from pathlib import Path
 
-object_id = os.environ.get('XCM_OBJECT_ID', '')
-output_dir = os.environ.get('XCM_OUTPUT_DIR', '/tmp/output')
+object_id = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
+output_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['output_dir'] }}"
 
 print(f"[upload] Preparing to upload results for object_id={object_id}")
 print(f"[upload] Output directory: {output_dir}")
@@ -277,10 +272,6 @@ else:
     sys.exit(1)
 """
         ],
-        env={
-            'XCM_OBJECT_ID': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["object_id"] }}',
-            'XCM_OUTPUT_DIR': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["output_dir"] }}',
-        },
         in_cluster=True,
         get_logs=True,
         is_delete_operator_pod=False,
