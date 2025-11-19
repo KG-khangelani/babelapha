@@ -193,7 +193,7 @@ fi
 FILENAME="{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}"
 OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
 S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
-S3_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_key'] }}"
+S3_INPUT_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_key'] }}"
 MINIO_ENDPOINT="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
 MINIO_ACCESS_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
 MINIO_SECRET_KEY="{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
@@ -203,11 +203,11 @@ echo "[transcode] Starting transcoding to HLS + DASH"
 mkdir -p /tmp/input /tmp/output/$OBJECT_ID/hls /tmp/output/$OBJECT_ID/dash
 
 # Download input file from MinIO using curl (ffmpeg/jrottenberg image likely has no aws-cli)
-echo "[transcode] Downloading input file from MinIO: $S3_KEY"
+echo "[transcode] Downloading input file from MinIO: $S3_INPUT_KEY"
 curl -X GET \
     -u "$MINIO_ACCESS_KEY:$MINIO_SECRET_KEY" \
     -o "/tmp/input/$FILENAME" \
-    "$MINIO_ENDPOINT/$S3_BUCKET/$S3_KEY"
+    "$MINIO_ENDPOINT/$S3_BUCKET/$S3_INPUT_KEY"
 
 if [ ! -f "/tmp/input/$FILENAME" ]; then
     echo "[transcode] ERROR: Failed to download input file from MinIO"
