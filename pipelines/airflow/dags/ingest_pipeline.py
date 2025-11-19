@@ -38,7 +38,7 @@ def ingest_pipeline():
         image="python:3.11-slim",
         image_pull_policy="Always",
         cmds=["sh", "-c"],
-        arguments=["apt-get update && apt-get install -y clamav-daemon && python3 /app/scan.py"],
+        arguments=["apt-get update && apt-get install -y clamav-daemon awscli git && pip install grpcio-tools && pachctl version > /dev/null && python3 /app/scan.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -65,7 +65,7 @@ def ingest_pipeline():
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
-        image="python:3.11-slim", image_pull_policy="Always", cmds=["sh", "-c"], arguments=["apt-get update && apt-get install -y ffmpeg mediainfo && python3 /app/validate.py"],
+        image="python:3.11-slim", image_pull_policy="Always", cmds=["sh", "-c"], arguments=["apt-get update && apt-get install -y ffmpeg mediainfo awscli git && pip install grpcio-tools && pachctl version > /dev/null && python3 /app/validate.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -96,7 +96,7 @@ def ingest_pipeline():
     transcode = KubernetesPodOperator( task_id="transcode", name="transcode", namespace="airflow", image="python:3.11-slim",
         image_pull_policy="Always",
         cmds=["sh", "-c"],
-        arguments=["apt-get update && apt-get install -y ffmpeg && python3 /app/transcode.py"],
+        arguments=["apt-get update && apt-get install -y ffmpeg awscli git && pip install grpcio-tools && pachctl version > /dev/null && python3 /app/transcode.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
