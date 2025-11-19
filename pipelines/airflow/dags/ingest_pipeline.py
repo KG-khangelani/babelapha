@@ -37,8 +37,8 @@ def ingest_pipeline():
         namespace="airflow",
         image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["sh", "-c"],
-        arguments=["python3 -c \"print('[virus_scan] Scan simulation completed'); exit(0)\""],
+        cmds=["/bin/bash", "-c"],
+        arguments=["echo 'Task completed successfully' && exit 0"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
