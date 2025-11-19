@@ -17,6 +17,7 @@ default_args = dict(retries=1)
 @dag(
     dag_id="ingest_pipeline_v2",
     description="Simplified media ingestion pipeline with micro-stages",
+    
     schedule=None,
     catchup=False,
     default_args=default_args,
