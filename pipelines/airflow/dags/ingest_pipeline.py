@@ -36,7 +36,7 @@ def ingest_pipeline():
         task_id="virus_scan",
         name="clamav-scan",
         namespace="airflow",
-        image="docker.io/clamav/clamav:latest",
+        image="clamav/clamav:latest",
         image_pull_policy="Always",
         container_kwargs={
             "command": ["python3"],
@@ -68,7 +68,7 @@ def ingest_pipeline():
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
-        image="docker.io/jrottenberg/ffmpeg:6.1-ubuntu",
+        image="jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
         container_kwargs={
             "command": ["python3"],
@@ -105,7 +105,7 @@ def ingest_pipeline():
         task_id="transcode",
         name="transcode",
         namespace="airflow",
-        image="docker.io/jrottenberg/ffmpeg:6.1-ubuntu",
+        image="jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
         container_kwargs={
             "command": ["python3"],
