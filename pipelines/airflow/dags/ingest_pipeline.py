@@ -3,13 +3,16 @@ Media Ingestion Pipeline for Pachyderm + Airflow
 
 This pipeline orchestrates the complete media ingestion workflow:
 1. Validate inputs and extract parameters
-2. Download file from Pachyderm S3 storage
+2. Download file from Pachyderm S3 storage (MinIO)
 3. Scan for viruses using ClamAV
 4. Validate media format and properties
 5. Transcode to standard formats (HLS + DASH)
 6. Upload results back to Pachyderm and MinIO
 
-Key configuration:
+Configuration:
+- MinIO endpoint: minio.minio-tenant.svc.cluster.local:80
+- MinIO credentials: From storage-user secret in minio-tenant namespace
+- S3 bucket: pachyderm (for media storage)
 - Deferred imports to avoid slow provider initialization
 - KubernetesPodOperator with get_logs=True for visibility
 - is_delete_operator_pod=False for debugging
@@ -18,6 +21,12 @@ Key configuration:
 from airflow.sdk import dag, task
 import json
 import os
+
+# MinIO configuration
+MINIO_ENDPOINT = "http://minio.minio-tenant.svc.cluster.local:80"
+MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', 'pachyderm')
+MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', 'pachyderm-secret-key-123456789')
+S3_BUCKET = "pachyderm"
 
 default_args = dict(retries=1)
 
@@ -52,14 +61,22 @@ def ingest_pipeline():
         return {
             'object_id': object_id,
             'filename': filename,
-            's3_input_path': f"s3://pachyderm/{object_id}/{filename}",
+            # MinIO paths (S3-compatible storage)
+            's3_bucket': S3_BUCKET,
+            's3_input_path': f"{S3_BUCKET}/input/{object_id}/{filename}",
+            's3_output_path': f"{S3_BUCKET}/output/{object_id}",
+            # Local paths for processing
             'local_input_path': f"/tmp/input/{filename}",
             'local_work_dir': f"/tmp/work/{object_id}",
             'output_dir': f"/tmp/output/{object_id}",
+            # MinIO configuration
+            'minio_endpoint': MINIO_ENDPOINT,
+            'minio_access_key': MINIO_ACCESS_KEY,
+            'minio_secret_key': MINIO_SECRET_KEY,
         }
 
     # ============================================================================
-    # STAGE 1: Download from Pachyderm S3
+    # STAGE 1: Download from Pachyderm S3 (MinIO)
     # ============================================================================
     download_from_pachyderm = KubernetesPodOperator(
         task_id="download_from_pachyderm",
@@ -73,26 +90,46 @@ def ingest_pipeline():
             """
 import sys
 from pathlib import Path
+import boto3
 
-# Hardcoded for now - in production, mount volume or use init container
-s3_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
+# Get parameters from XCom
+s3_bucket = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
+s3_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_input_path'] }}"
 local_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_input_path'] }}"
 work_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['local_work_dir'] }}"
-
-print(f"[download] Parameters received:")
-print(f"  S3_PATH: {s3_path}")
-print(f"  LOCAL_PATH: {local_path}")
-print(f"  WORK_DIR: {work_dir}")
+minio_endpoint = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
+minio_access_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
+minio_secret_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
 
 # Create directories
 Path(work_dir).mkdir(parents=True, exist_ok=True)
-print(f"[download] Work directory created: {work_dir}")
+Path(local_path).parent.mkdir(parents=True, exist_ok=True)
 
-# TODO: Download from S3 using boto3
-# s3_client = boto3.client('s3', endpoint_url='http://minio:9000')
-# s3_client.download_file('pachyderm', key, local_path)
+print(f"[download] Downloading from MinIO")
+print(f"  Endpoint: {minio_endpoint}")
+print(f"  Bucket: {s3_bucket}")
+print(f"  Key: {s3_key}")
+print(f"  Local: {local_path}")
 
-print("[download] Download would occur here (S3 credentials configured)")
+try:
+    # Connect to MinIO (S3-compatible)
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=minio_endpoint,
+        aws_access_key_id=minio_access_key,
+        aws_secret_access_key=minio_secret_key,
+        use_ssl=False,
+    )
+    
+    # Download file
+    s3_client.download_file(s3_bucket, s3_key, local_path)
+    print(f"[download] Successfully downloaded: {local_path}")
+    
+except Exception as e:
+    print(f"[download] ERROR: {str(e)}")
+    print(f"[download] Verify MinIO credentials and bucket/key exist")
+    sys.exit(1)
+
 sys.exit(0)
 """
         ],
@@ -247,9 +284,15 @@ fi
             """
 import sys
 from pathlib import Path
+import boto3
 
 object_id = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"
 output_dir = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['output_dir'] }}"
+s3_bucket = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
+s3_output_path = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_output_path'] }}"
+minio_endpoint = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_endpoint'] }}"
+minio_access_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_access_key'] }}"
+minio_secret_key = "{{ task_instance.xcom_pull(task_ids='validate_inputs')['minio_secret_key'] }}"
 
 print(f"[upload] Preparing to upload results for object_id={object_id}")
 print(f"[upload] Output directory: {output_dir}")
@@ -258,17 +301,44 @@ print(f"[upload] Output directory: {output_dir}")
 hls_manifest = Path(f"{output_dir}/hls/playlist.m3u8")
 dash_manifest = Path(f"{output_dir}/dash/manifest.mpd")
 
-if hls_manifest.exists() and dash_manifest.exists():
-    print(f"[upload] Found HLS: {hls_manifest}")
-    print(f"[upload] Found DASH: {dash_manifest}")
-    # TODO: Upload to MinIO/S3 using boto3
-    # s3_client.upload_file(..., f"pachyderm/output/{object_id}/hls/...")
-    print("[upload] Upload would proceed to S3 storage")
-    sys.exit(0)
-else:
+if not (hls_manifest.exists() and dash_manifest.exists()):
     print(f"[upload] ERROR: Output files not found")
     print(f"[upload] HLS exists: {hls_manifest.exists()}")
     print(f"[upload] DASH exists: {dash_manifest.exists()}")
+    sys.exit(1)
+
+print(f"[upload] Found HLS: {hls_manifest}")
+print(f"[upload] Found DASH: {dash_manifest}")
+
+try:
+    # Connect to MinIO
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=minio_endpoint,
+        aws_access_key_id=minio_access_key,
+        aws_secret_access_key=minio_secret_key,
+        use_ssl=False,
+    )
+    
+    # Upload HLS files
+    hls_dir = Path(f"{output_dir}/hls")
+    for file in hls_dir.glob("*"):
+        s3_key = f"{s3_output_path}/hls/{file.name}"
+        s3_client.upload_file(str(file), s3_bucket, s3_key)
+        print(f"[upload] Uploaded HLS: {s3_key}")
+    
+    # Upload DASH files
+    dash_dir = Path(f"{output_dir}/dash")
+    for file in dash_dir.glob("*"):
+        s3_key = f"{s3_output_path}/dash/{file.name}"
+        s3_client.upload_file(str(file), s3_bucket, s3_key)
+        print(f"[upload] Uploaded DASH: {s3_key}")
+    
+    print(f"[upload] Successfully uploaded all results to {s3_output_path}")
+    sys.exit(0)
+    
+except Exception as e:
+    print(f"[upload] ERROR uploading to S3: {str(e)}")
     sys.exit(1)
 """
         ],
