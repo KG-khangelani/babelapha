@@ -1,14 +1,23 @@
+"""
+Minimal test version of ingest pipeline.
+
+This version focuses on testing the KubernetesPodOperator configuration
+without external dependencies (network, packages, etc).
+
+Key fixes applied:
+1. Removed is_delete_operator_pod=True (can mask exit codes)
+2. Removed unnecessary volumes/secrets for testing
+3. Using simple Python inline commands instead of external scripts
+4. Each task is self-contained with minimal dependencies
+"""
 from airflow.sdk import dag, task
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-from airflow.providers.cncf.kubernetes.secret import Secret
-from kubernetes.client import models as k8s
-import os
 
-default_args = dict(retries=2)
+default_args = dict(retries=1)
 
 @dag(
     dag_id="ingest_pipeline",
-    description="Media ingestion and processing flow integrated with Pachyderm",
+    description="Media ingestion pipeline (test version)",
     schedule=None,
     catchup=False,
     default_args=default_args,
@@ -16,48 +25,30 @@ default_args = dict(retries=2)
     tags=["ingest", "pachyderm", "media"],
 )
 def ingest_pipeline():
-    def base_env():
-        return {
-            "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600"),
-            "PACH_S3_PREFIX": os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master"),
-            "PFS_REPO": "media",
-            "PFS_BRANCH": "master",
-            "PYTHONPATH": "/app",
-        }
-
-    pach_token = Secret(deploy_type="env", deploy_target="PACH_TOKEN", secret="pach-auth-media", key="token")
+    """Minimal ingest pipeline for testing."""
 
     @task
     def start():
-        return "Starting pipeline"
+        """Start marker."""
+        print("[START] Pipeline initialized")
+        return "started"
 
+    # Simple test: Just echo and exit cleanly
     virus_scan = KubernetesPodOperator(
         task_id="virus_scan",
-        name="clamav-scan",
+        name="virus-scan",
         namespace="airflow",
         image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["/bin/bash", "-c"],
-        arguments=["echo 'Task completed successfully' && exit 0"],
-        env_vars={
-            **base_env(),
-            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
-            "SRC_PATH": "/incoming/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
-            "DEST_PATH": "/clean/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
-            "PYTHONPATH": "/app",
-        },
-        secrets=[pach_token],
+        cmds=["python3"],
+        arguments=[
+            "-c",
+            "import sys; print('[virus_scan] Complete'); sys.exit(0)"
+        ],
         in_cluster=True,
         get_logs=True,
-        is_delete_operator_pod=True,
-        volume_mounts=[
-            k8s.V1VolumeMount(name="clamav-script", mount_path="/app", read_only=True),
-            k8s.V1VolumeMount(name="utils-script", mount_path="/app/utils", read_only=True),
-        ],
-        volumes=[
-            k8s.V1Volume(name="clamav-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-clamav-script")),
-            k8s.V1Volume(name="utils-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-utils-script")),
-        ],
+        # IMPORTANT: Don't delete pod - helps with debugging
+        is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
@@ -65,70 +56,46 @@ def ingest_pipeline():
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
-        image="python:3.11-slim", image_pull_policy="Always", cmds=["sh", "-c"], arguments=["python3 -c \"print('[validate_media] Validation simulation completed'); exit(0)\""],
-        env_vars={
-            **base_env(),
-            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
-            "SRC_PATH": "/clean/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
-            "DEST_PATH": "/validated/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
-            "REPORT_PATH": "/reports/{{ dag_run.conf.get('id', 'default-id') }}/validation.json",
-            "PYTHONPATH": "/app",
-        },
-        secrets=[pach_token],
-        in_cluster=True,
-        get_logs=True,
-        is_delete_operator_pod=True,
-        volume_mounts=[
-            k8s.V1VolumeMount(name="ffmpeg-script", mount_path="/app", read_only=True),
-            k8s.V1VolumeMount(name="utils-script", mount_path="/app/utils", read_only=True),
-        ],
-        volumes=[
-            k8s.V1Volume(name="ffmpeg-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-ffmpeg-script")),
-            k8s.V1Volume(name="utils-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-utils-script")),
-        ],
-        node_selector={"kubernetes.io/arch": "amd64"},
-    )
-
-    @task
-    def route_decision(**context):
-        return "transcode"
-
-    transcode = KubernetesPodOperator( task_id="transcode", name="transcode", namespace="airflow", image="python:3.11-slim",
+        image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["sh", "-c"],
-        arguments=["python3 -c \"print('[transcode] Transcoding simulation completed'); exit(0)\""],
-        env_vars={
-            **base_env(),
-            "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
-            "SRC_PATH": "/validated/{{ dag_run.conf.get('id', 'default-id') }}/{{ dag_run.conf.get('filename', 'default.mp4') }}",
-            "DEST_PATH": "/transcoded/{{ dag_run.conf.get('id', 'default-id') }}",
-            "OUTPUT_FORMATS": "hls,dash",
-            "PYTHONPATH": "/app",
-        },
-        secrets=[pach_token],
+        cmds=["python3"],
+        arguments=[
+            "-c",
+            "import sys; print('[validate_media] Complete'); sys.exit(0)"
+        ],
         in_cluster=True,
         get_logs=True,
-        is_delete_operator_pod=True,
-        volume_mounts=[
-            k8s.V1VolumeMount(name="ffmpeg-script", mount_path="/app", read_only=True),
-            k8s.V1VolumeMount(name="utils-script", mount_path="/app/utils", read_only=True),
+        is_delete_operator_pod=False,
+        node_selector={"kubernetes.io/arch": "amd64"},
+    )
+
+    transcode = KubernetesPodOperator(
+        task_id="transcode",
+        name="transcode",
+        namespace="airflow",
+        image="python:3.11-slim",
+        image_pull_policy="Always",
+        cmds=["python3"],
+        arguments=[
+            "-c",
+            "import sys; print('[transcode] Complete'); sys.exit(0)"
         ],
-        volumes=[
-            k8s.V1Volume(name="ffmpeg-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-ffmpeg-script")),
-            k8s.V1Volume(name="utils-script", config_map=k8s.V1ConfigMapVolumeSource(name="ingest-utils-script")),
-        ],
+        in_cluster=True,
+        get_logs=True,
+        is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
     @task
-    def end():
-        return "Pipeline complete"
+    def end(result):
+        """End marker."""
+        print(f"[END] Pipeline completed: {result}")
+        return "completed"
 
-    start() >> virus_scan >> validate_media >> route_decision() >> transcode >> end()
+    # Simple linear pipeline for now
+    start() >> virus_scan >> validate_media >> transcode >> end("success")
 
 ingest_pipeline()
-
-### testing triggers like a boza
 
 
 
