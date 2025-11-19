@@ -6,11 +6,9 @@ Architecture:
 - Minimal operator configuration to reduce failure modes
 - Explicit error handling at each step
 - Pure Python for control flow, KPO only for actual processing
+- Deferred KubernetesPodOperator import to avoid slow provider initialization
 """
 from airflow.sdk import dag, task
-from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-from airflow.providers.cncf.kubernetes.secret import Secret
-from kubernetes.client import models as k8s
 import os
 from datetime import datetime
 
@@ -27,6 +25,10 @@ default_args = dict(retries=1)
 )
 def ingest_pipeline_v2():
     """Simplified pipeline with clear stage separation."""
+    # Deferred imports to avoid slow provider manager initialization during DAG parsing
+    from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+    from airflow.providers.cncf.kubernetes.secret import Secret
+    from kubernetes.client import models as k8s
     
     @task
     def validate_inputs(**context):

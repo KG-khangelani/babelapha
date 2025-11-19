@@ -9,9 +9,9 @@ Key fixes applied:
 2. Removed unnecessary volumes/secrets for testing
 3. Using simple Python inline commands instead of external scripts
 4. Each task is self-contained with minimal dependencies
+5. Deferred KubernetesPodOperator import to avoid slow provider initialization
 """
 from airflow.sdk import dag, task
-from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
 default_args = dict(retries=1)
 
@@ -26,6 +26,8 @@ default_args = dict(retries=1)
 )
 def ingest_pipeline():
     """Minimal ingest pipeline for testing."""
+    # Deferred import to avoid slow provider manager initialization during DAG parsing
+    from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
     @task
     def start():
