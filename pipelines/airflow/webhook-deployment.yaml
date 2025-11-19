@@ -1,0 +1,119 @@
+---
+# ConfigMap for webhook listener configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pachyderm-webhook-config
+  namespace: airflow
+data:
+  AIRFLOW_API_URL: "http://airflow-webserver.airflow:8080/api/v1"
+  WEBHOOK_PORT: "8000"
+  DEBUG: "false"
+
+---
+# Service for the webhook listener
+apiVersion: v1
+kind: Service
+metadata:
+  name: pachyderm-webhook
+  namespace: airflow
+  labels:
+    app: pachyderm-webhook
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  selector:
+    app: pachyderm-webhook
+
+---
+# Deployment for the webhook listener
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pachyderm-webhook
+  namespace: airflow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pachyderm-webhook
+  template:
+    metadata:
+      labels:
+        app: pachyderm-webhook
+    spec:
+      containers:
+      - name: webhook
+        image: python:3.11-slim
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: AIRFLOW_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: pachyderm-webhook-config
+              key: AIRFLOW_API_URL
+        - name: WEBHOOK_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pachyderm-webhook-config
+              key: WEBHOOK_PORT
+        - name: DEBUG
+          valueFrom:
+            configMapKeyRef:
+              name: pachyderm-webhook-config
+              key: DEBUG
+        command:
+          - sh
+          - -c
+          - |
+            pip install flask requests --quiet && \
+            python /app/webhook_listener.py
+        volumeMounts:
+        - name: webhook-code
+          mountPath: /app
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: webhook-code
+        configMap:
+          name: webhook-listener-code
+          defaultMode: 0555
+
+---
+# ConfigMap to store the webhook listener Python code
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-listener-code
+  namespace: airflow
+data:
+  webhook_listener.py: |
+    #!/usr/bin/env python3
+    """
+    Webhook listener for Pachyderm file upload events.
+    (content from webhook_listener.py)
+    """
+    # [Full Python code will be embedded here during deployment]
