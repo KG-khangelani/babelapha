@@ -141,3 +141,5 @@ def ingest_pipeline():
     start() >> virus_scan >> validate_media >> route_decision() >> transcode >> end()
 
 ingest_pipeline()
+
+### testing triggers like a boza
