@@ -64,6 +64,7 @@ def ingest_pipeline():
         get_logs=True,
         is_delete_operator_pod=True,
         image_pull_policy="IfNotPresent",  # Use local images if available
+        node_selector={"kubernetes.io/arch": "amd64"},  # Require x86_64 nodes (ClamAV not available on ARM64)
     )
 
     # -------------------------------
@@ -86,6 +87,7 @@ def ingest_pipeline():
         get_logs=True,
         is_delete_operator_pod=True,
         image_pull_policy="IfNotPresent",  # Use local images if available
+        node_selector={"kubernetes.io/arch": "amd64"},  # Require x86_64 nodes
     )
 
     # -------------------------------
@@ -120,6 +122,7 @@ def ingest_pipeline():
         get_logs=True,
         is_delete_operator_pod=True,
         image_pull_policy="IfNotPresent",  # Use local images if available
+        node_selector={"kubernetes.io/arch": "amd64"},  # Require x86_64 nodes
     )
 
     # -------------------------------
