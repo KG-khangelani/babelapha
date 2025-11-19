@@ -35,10 +35,10 @@ def ingest_pipeline():
         task_id="virus_scan",
         name="clamav-scan",
         namespace="airflow",
-        image="clamav/clamav:latest",
+        image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["python3"],
-        arguments=["/app/scan.py"],
+        cmds=["sh", "-c"],
+        arguments=["apt-get update && apt-get install -y clamav-daemon && python3 /app/scan.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -65,10 +65,7 @@ def ingest_pipeline():
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
-        image="jrottenberg/ffmpeg:6.1-ubuntu",
-        image_pull_policy="Always",
-        cmds=["python3"],
-        arguments=["/app/validate.py"],
+        image="python:3.11-slim", image_pull_policy="Always", cmds=["sh", "-c"], arguments=["apt-get update && apt-get install -y ffmpeg mediainfo && python3 /app/validate.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -96,14 +93,10 @@ def ingest_pipeline():
     def route_decision(**context):
         return "transcode"
 
-    transcode = KubernetesPodOperator(
-        task_id="transcode",
-        name="transcode",
-        namespace="airflow",
-        image="jrottenberg/ffmpeg:6.1-ubuntu",
+    transcode = KubernetesPodOperator( task_id="transcode", name="transcode", namespace="airflow", image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["python3"],
-        arguments=["/app/transcode.py"],
+        cmds=["sh", "-c"],
+        arguments=["apt-get update && apt-get install -y ffmpeg && python3 /app/transcode.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -136,3 +129,8 @@ def ingest_pipeline():
 ingest_pipeline()
 
 ### testing triggers like a boza
+
+
+
+
+
