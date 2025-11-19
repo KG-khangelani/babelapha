@@ -1,5 +1,4 @@
-from airflow.sdk.dag import dag
-from airflow.sdk.task import task
+from airflow.sdk import dag, task
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.cncf.kubernetes.secret import Secret
 from kubernetes.client import models as k8s
