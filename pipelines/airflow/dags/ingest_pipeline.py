@@ -90,12 +90,14 @@ print("[download] Download would occur here (S3 credentials configured)")
 sys.exit(0)
 """
         ],
-        env={
-            'S3_PATH': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["s3_input_path"] }}',
-            'LOCAL_PATH': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_input_path"] }}',
-            'WORK_DIR': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_work_dir"] }}',
-            'AWS_ACCESS_KEY_ID': os.environ.get('MINIO_ACCESS_KEY', 'pachyderm'),
-            'AWS_SECRET_ACCESS_KEY': os.environ.get('MINIO_SECRET_KEY', 'pachyderm'),
+        container_kwargs={
+            'env': [
+                {'name': 'S3_PATH', 'value': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["s3_input_path"] }}'},
+                {'name': 'LOCAL_PATH', 'value': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_input_path"] }}'},
+                {'name': 'WORK_DIR', 'value': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["local_work_dir"] }}'},
+                {'name': 'AWS_ACCESS_KEY_ID', 'value': os.environ.get('MINIO_ACCESS_KEY', 'pachyderm')},
+                {'name': 'AWS_SECRET_ACCESS_KEY', 'value': os.environ.get('MINIO_SECRET_KEY', 'pachyderm')},
+            ]
         },
         in_cluster=True,
         get_logs=True,
@@ -273,9 +275,11 @@ else:
     sys.exit(1)
 """
         ],
-        env={
-            'OBJECT_ID': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["object_id"] }}',
-            'OUTPUT_DIR': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["output_dir"] }}',
+        container_kwargs={
+            'env': [
+                {'name': 'OBJECT_ID', 'value': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["object_id"] }}'},
+                {'name': 'OUTPUT_DIR', 'value': '{{ task_instance.xcom_pull(task_ids="validate_inputs")["output_dir"] }}'},
+            ]
         },
         in_cluster=True,
         get_logs=True,
