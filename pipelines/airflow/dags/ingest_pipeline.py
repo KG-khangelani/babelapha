@@ -195,27 +195,51 @@ OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }
 
 echo "[transcode] Starting transcoding to HLS + DASH"
 
+# Check input file exists
+if [ ! -f "/tmp/input/$FILENAME" ]; then
+    echo "[transcode] ERROR: Input file not found: /tmp/input/$FILENAME"
+    ls -la /tmp/input/ 2>&1 || echo "Cannot list /tmp/input"
+    exit 1
+fi
+
+INPUT_SIZE=$(stat -f%z "/tmp/input/$FILENAME" 2>/dev/null || stat -c%s "/tmp/input/$FILENAME" 2>/dev/null || echo "unknown")
+echo "[transcode] Input file size: $INPUT_SIZE bytes"
+
 mkdir -p /tmp/output/$OBJECT_ID/hls /tmp/output/$OBJECT_ID/dash
 
-# HLS Transcoding
+# HLS Transcoding - capture full output for debugging
 echo "[transcode] Creating HLS output..."
 ffmpeg -i "/tmp/input/$FILENAME" \
     -c:v libx264 -crf 23 -c:a aac \
     -f hls -hls_time 10 -hls_list_size 0 \
-    "/tmp/output/$OBJECT_ID/hls/playlist.m3u8" 2>&1 | tail -20
+    "/tmp/output/$OBJECT_ID/hls/playlist.m3u8" > /tmp/transcode_hls.log 2>&1
 
-# DASH Transcoding  
+HLS_EXIT=$?
+echo "[transcode] HLS FFmpeg exit code: $HLS_EXIT"
+tail -30 /tmp/transcode_hls.log
+
+# DASH Transcoding - capture full output for debugging
 echo "[transcode] Creating DASH output..."
 ffmpeg -i "/tmp/input/$FILENAME" \
     -c:v libx264 -crf 23 -c:a aac \
     -f dash -seg_duration 10 \
-    "/tmp/output/$OBJECT_ID/dash/manifest.mpd" 2>&1 | tail -20
+    "/tmp/output/$OBJECT_ID/dash/manifest.mpd" > /tmp/transcode_dash.log 2>&1
 
+DASH_EXIT=$?
+echo "[transcode] DASH FFmpeg exit code: $DASH_EXIT"
+tail -30 /tmp/transcode_dash.log
+
+# Check if outputs were created
 if [ -f "/tmp/output/$OBJECT_ID/hls/playlist.m3u8" ] && [ -f "/tmp/output/$OBJECT_ID/dash/manifest.mpd" ]; then
     echo "[transcode] Transcoding completed successfully"
+    ls -la /tmp/output/$OBJECT_ID/hls/ /tmp/output/$OBJECT_ID/dash/
     exit 0
 else
     echo "[transcode] Transcoding failed - output files not created"
+    echo "[transcode] HLS directory contents:"
+    ls -la /tmp/output/$OBJECT_ID/hls/ 2>&1 || echo "HLS directory empty/missing"
+    echo "[transcode] DASH directory contents:"
+    ls -la /tmp/output/$OBJECT_ID/dash/ 2>&1 || echo "DASH directory empty/missing"
     exit 1
 fi
 """
