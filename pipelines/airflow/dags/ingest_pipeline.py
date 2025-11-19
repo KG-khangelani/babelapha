@@ -1,4 +1,5 @@
-from airflow.sdk import dag, task
+from airflow.sdk.dag import dag
+from airflow.sdk.task import task
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.cncf.kubernetes.secret import Secret
 from kubernetes.client import models as k8s
@@ -37,10 +38,8 @@ def ingest_pipeline():
         namespace="airflow",
         image="clamav/clamav:latest",
         image_pull_policy="Always",
-        container_kwargs={
-            "command": ["python3"],
-            "args": ["/app/scan.py"],
-        },
+        cmds=["python3"],
+        arguments=["/app/scan.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -69,10 +68,8 @@ def ingest_pipeline():
         namespace="airflow",
         image="jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
-        container_kwargs={
-            "command": ["python3"],
-            "args": ["/app/validate.py"],
-        },
+        cmds=["python3"],
+        arguments=["/app/validate.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -106,10 +103,8 @@ def ingest_pipeline():
         namespace="airflow",
         image="jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
-        container_kwargs={
-            "command": ["python3"],
-            "args": ["/app/transcode.py"],
-        },
+        cmds=["python3"],
+        arguments=["/app/transcode.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
