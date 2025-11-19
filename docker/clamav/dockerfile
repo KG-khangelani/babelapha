@@ -1,5 +1,5 @@
 # file: docker/clamav/Dockerfile
-FROM clamav/clamav:latest
+FROM docker.io/clamav/clamav:latest
 RUN apk add --no-cache python3 py3-pip curl jq awscli
 
 # Install pachctl for Pachyderm operations

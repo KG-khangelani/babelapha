@@ -1,5 +1,5 @@
 # file: docker/validate/Dockerfile
-FROM jrottenberg/ffmpeg:6.1-ubuntu
+FROM docker.io/jrottenberg/ffmpeg:6.1-ubuntu
 RUN apt-get update && apt-get install -y \
     mediainfo \
     python3 \
