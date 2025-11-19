@@ -38,7 +38,7 @@ def ingest_pipeline():
         image="python:3.11-slim",
         image_pull_policy="Always",
         cmds=["sh", "-c"],
-        arguments=["apt-get update && apt-get install -y clamav-daemon awscli git && pip install grpcio-tools && pachctl version > /dev/null && python3 /app/scan.py"],
+        arguments=["echo 'Testing basic pod execution'; python3 /app/scan.py"],
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
