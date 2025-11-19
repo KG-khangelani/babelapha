@@ -5,20 +5,11 @@ from airflow.providers.cncf.kubernetes.secret import Secret
 from kubernetes.client import models as k8s
 import os
 
-# =====================================================================
-# DAG: ingest_pipeline
-# Purpose:
-#   Orchestrates upload → scan → validate → transcode using Pachyderm
-#   Uses PUBLIC base images with scripts injected via ConfigMaps
-#   No custom image builds required
-# =====================================================================
-
 default_args = dict(retries=2)
 
 @dag(
     dag_id="ingest_pipeline",
     description="Media ingestion and processing flow integrated with Pachyderm",
-    # start_date=datetime(2024, 1, 1),
     schedule=None,
     catchup=False,
     default_args=default_args,
@@ -26,12 +17,8 @@ default_args = dict(retries=2)
     tags=["ingest", "pachyderm", "media"],
 )
 def ingest_pipeline():
-    # -------------------------------
-    # Helper: common environment vars
-    # -------------------------------
     def base_env():
         return {
-            # Fix default endpoint hostname typo (pachyderm)
             "PACH_S3_ENDPOINT": os.environ.get("PACH_S3_ENDPOINT", "http://pachd-proxy-backend.pachyderm:1600"),
             "PACH_S3_PREFIX": os.environ.get("PACH_S3_PREFIX", "s3://pach/media/master"),
             "PFS_REPO": "media",
@@ -41,26 +28,20 @@ def ingest_pipeline():
 
     pach_token = Secret(deploy_type="env", deploy_target="PACH_TOKEN", secret="pach-auth-media", key="token")
 
-    # -------------------------------
-    # DAG start
-    # -------------------------------
     @task
     def start():
         return "Starting pipeline"
 
-    # -------------------------------
-    # Virus Scan (ClamAV)
-    # Uses public docker.io/clamav/clamav:latest
-    # Injects scan.py via ConfigMap
-    # -------------------------------
     virus_scan = KubernetesPodOperator(
         task_id="virus_scan",
         name="clamav-scan",
         namespace="airflow",
         image="docker.io/clamav/clamav:latest",
         image_pull_policy="Always",
-        command=["python3"],
-        arguments=["/app/scan.py"],
+        container_kwargs={
+            "command": ["python3"],
+            "args": ["/app/scan.py"],
+        },
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -83,19 +64,16 @@ def ingest_pipeline():
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
-    # -------------------------------
-    # Validation (FFprobe + MediaInfo)
-    # Uses public docker.io/jrottenberg/ffmpeg:6.1-ubuntu
-    # Injects validate.py via ConfigMap
-    # -------------------------------
     validate_media = KubernetesPodOperator(
         task_id="validate_media",
         name="validate-media",
         namespace="airflow",
         image="docker.io/jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
-        command=["python3"],
-        arguments=["/app/validate.py"],
+        container_kwargs={
+            "command": ["python3"],
+            "args": ["/app/validate.py"],
+        },
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -119,31 +97,20 @@ def ingest_pipeline():
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
-    # -------------------------------
-    # Route Decision (placeholder)
-    # Could read report JSON to decide to quarantine or proceed to transcode
-    # For now: always proceed to transcode
-    # -------------------------------
     @task
     def route_decision(**context):
-        # Example logic for future use:
-        # reports_path = f"/reports/{context['dag_run'].conf['id']}/validation.json"
-        # read from PFS if needed
         return "transcode"
 
-    # -------------------------------
-    # Transcode (HLS/DASH)
-    # Uses public docker.io/jrottenberg/ffmpeg:6.1-ubuntu
-    # Injects transcode.py via ConfigMap
-    # -------------------------------
     transcode = KubernetesPodOperator(
         task_id="transcode",
         name="transcode",
         namespace="airflow",
         image="docker.io/jrottenberg/ffmpeg:6.1-ubuntu",
         image_pull_policy="Always",
-        command=["python3"],
-        arguments=["/app/transcode.py"],
+        container_kwargs={
+            "command": ["python3"],
+            "args": ["/app/transcode.py"],
+        },
         env_vars={
             **base_env(),
             "OBJ_ID": "{{ dag_run.conf.get('id', 'default-id') }}",
@@ -167,16 +134,10 @@ def ingest_pipeline():
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
-    # -------------------------------
-    # DAG end
-    # -------------------------------
     @task
     def end():
         return "Pipeline complete"
 
-    # DAG structure
     start() >> virus_scan >> validate_media >> route_decision() >> transcode >> end()
 
-# Instantiate the DAG
 ingest_pipeline()
-# inja madoda
