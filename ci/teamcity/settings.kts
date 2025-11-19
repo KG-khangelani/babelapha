@@ -1,248 +1,215 @@
-import jetbrains.buildServer.configs.kotlin.v2019_2.Project
-import jetbrains.buildServer.configs.kotlin.v2019_2.buildSteps.script
-import jetbrains.buildServer.configs.kotlin.v2019_2.triggers.vcs
-import jetbrains.buildServer.configs.kotlin.v2019_2.version
-import jetbrains.buildServer.configs.kotlin.v2019_2.DslContext
-import jetbrains.buildServer.configs.kotlin.v2019_2.BuildType
-import jetbrains.buildServer.configs.kotlin.v2019_2.buildSteps
-import jetbrains.buildServer.configs.kotlin.v2019_2.triggers
-import jetbrains.buildServer.configs.kotlin.v2019_2.buildSteps.dockerCommand
+package _Self.buildTypes
 
-version = "2024.03"
+import jetbrains.buildServer.configs.kotlin.*
+import jetbrains.buildServer.configs.kotlin.buildFeatures.perfmon
+import jetbrains.buildServer.configs.kotlin.buildSteps.Qodana
+import jetbrains.buildServer.configs.kotlin.buildSteps.dockerCommand
+import jetbrains.buildServer.configs.kotlin.buildSteps.qodana
+import jetbrains.buildServer.configs.kotlin.triggers.vcs
 
-project {
-    id("Babelapha")
-    name = "Babelapha"
-    description = "Continuous integration pipelines for the media platform project."
+object AirflowGitSync : BuildType({
+    name = "Airflow GitSync"
+    description = "automatically syncs DAGs from the Git repository to your Airflow deployment"
 
-    buildType(MediaPipelineChecks)
-    buildType(BuildClamAVImage)
-    buildType(BuildValidateImage)
-    buildType(BuildTranscodeImage)
-}
-
-object MediaPipelineChecks : BuildType({
-    name = "Media Pipeline Checks"
-    description = "Validate Airflow DAGs, Pachyderm specs, and run unit placeholders."
+    params {
+        param("env.GITHUB_TOKEN", "%system.github_token%")
+        param("env.DAGS_FOLDER", "/opt/airflow/dags")
+        param("env.AIRFLOW_NAMESPACE", "airflow")
+        param("env.AIRFLOW_POD_LABEL", "component=scheduler")
+        param("env.SOURCE_DIR", "pipelines/airflow/dags")
+    }
 
     vcs {
-        root(DslContext.settingsRoot)
+        root(HttpsGithubComKgKhangelaniBabelaphaRefsHeadsMain3)
     }
-
     steps {
-        script {
-            name = "Validate Airflow DAG syntax"
-            scriptContent = """
-            python -m venv .venv
-            . .venv/bin/activate
-            pip install "apache-airflow"
-            python -m compileall pipelines/airflow/dags
-            """.trimIndent()
+        qodana {
+            name = "maqondana scan"
+            id = "maqondana_scan"
+            enabled = false
+            linter = python {
+                version = Qodana.PythonVersion.LATEST
+            }
+            inspectionProfile = default()
+            additionalDockerArguments = "--memory=4g --memory-swap=4g"
+            cli = "v2025.1.1"
+            cloudToken = "******"
         }
-
-        script {
-            name = "Lint Pachyderm pipeline YAML"
-            scriptContent = """
-            python -m venv .venv-yq
-            . .venv-yq/bin/activate
-            pip install yq
-            yq eval '.' pipelines/pachyderm/transcription-pipeline.yaml >/dev/null
-            """.trimIndent()
-        }
-
-        script {
-            name = "Placeholder tests"
-            scriptContent = """
-            echo "TODO: add unit/integration tests"
-            """.trimIndent()
-        }
-    }
-
-    triggers {
-        vcs {
-            branchFilter = "+:refs/heads/*"
-        }
-    }
-})
-
-object BuildClamAVImage : BuildType({
-    name = "Build ClamAV Image"
-    description = "Build Docker image for virus scanning"
-
-    vcs {
-        root(DslContext.settingsRoot)
-    }
-
-    requirements {
-        contains("docker.server.osType", "linux")
-    }
-
-    steps {
-        script {
-            name = "Copy utility files"
-            scriptContent = """
-            cp docker/utils/pfs_move.py docker/clamav/
-            """.trimIndent()
-        }
-
         dockerCommand {
-            name = "Build and import to containerd"
+            name = "Build Validator Image"
+            id = "Validate_DAG_Syntax_1"
+            commandType = build {
+                source = file {
+                    path = "docker/airflow-gitsync/Dockerfile.validate"
+                }
+                namesAndTags = "airflow-dag-validator:%build.number%"
+                commandArgs = "--pull"
+            }
+        }
+        dockerCommand {
+            name = "Validate DAG Syntax"
+            id = "DockerCommand"
             commandType = other {
-                subCommand = "build"
+                subCommand = "run"
                 commandArgs = """
-                -t clamav:%build.number%
-                -t clamav:latest
-                -f docker/clamav/dockerfile
-                docker/clamav
+                    --rm
+                    -v %teamcity.build.checkoutDir%:/workspace
+                    airflow-dag-validator:%build.number%
                 """.trimIndent()
             }
         }
-
-        script {
-            name = "Load into containerd on all nodes"
-            scriptContent = """
-            # Save image to tar
-            docker save clamav:%build.number% -o /tmp/clamav.tar
-            
-            # Import to local containerd
-            ctr -n k8s.io images import /tmp/clamav.tar
-            
-            # Copy to other nodes and import
-            for node in 192.168.10.12 192.168.10.13 192.168.10.10; do
-                echo "Loading image on node ${'$'}node"
-                scp /tmp/clamav.tar ${'$'}node:/tmp/ || true
-                ssh ${'$'}node "ctr -n k8s.io images import /tmp/clamav.tar && rm /tmp/clamav.tar" || true
-            done
-            
-            # Cleanup
-            rm /tmp/clamav.tar
-            """.trimIndent()
-        }
-    }
-
-    triggers {
-        vcs {
-            branchFilter = "+:refs/heads/*"
-            triggerRules = "+:docker/clamav/**"
-        }
-    }
-})
-
-object BuildValidateImage : BuildType({
-    name = "Build Validate Image"
-    description = "Build Docker image for media validation"
-
-    vcs {
-        root(DslContext.settingsRoot)
-    }
-
-    requirements {
-        contains("docker.server.osType", "linux")
-    }
-
-    steps {
-        script {
-            name = "Copy utility files"
-            scriptContent = """
-            cp docker/utils/pfs_move.py docker/validate/
-            """.trimIndent()
-        }
-
         dockerCommand {
-            name = "Build image"
+            name = "Build GitSync Container"
+            id = "Build_GitSync_Container"
+            commandType = build {
+                source = file {
+                    path = "docker/airflow-gitsync/Dockerfile"
+                }
+                namesAndTags = """
+                    airflow-gitsync:%build.number%
+                    airflow-gitsync:latest
+                """.trimIndent()
+                commandArgs = "--pull"
+            }
+        }
+        dockerCommand {
+            name = "Test Network Connectivity"
+            id = "Test_Network_Connectivity"
+            enabled = false
             commandType = other {
-                subCommand = "build"
+                subCommand = "run"
                 commandArgs = """
-                -t validate:%build.number%
-                -t validate:latest
-                -f docker/validate/dockerfile
-                docker/validate
+                    --rm
+                                --network host
+                                alpine:latest
+                                ping -c 3 github.com
                 """.trimIndent()
             }
         }
-
-        script {
-            name = "Load into containerd on all nodes"
-            scriptContent = """
-            # Save image to tar
-            docker save validate:%build.number% -o /tmp/validate.tar
-            
-            # Import to local containerd
-            ctr -n k8s.io images import /tmp/validate.tar
-            
-            # Copy to other nodes and import
-            for node in 192.168.10.12 192.168.10.13 192.168.10.10; do
-                echo "Loading image on node ${'$'}node"
-                scp /tmp/validate.tar ${'$'}node:/tmp/ || true
-                ssh ${'$'}node "ctr -n k8s.io images import /tmp/validate.tar && rm /tmp/validate.tar" || true
-            done
-            
-            # Cleanup
-            rm /tmp/validate.tar
+        dockerCommand {
+            name = "Sync DAGs to Airflow"
+            id = "Sync_DAGs_to_Airflow"
+            commandType = other {
+                subCommand = "run"
+                commandArgs = """
+                    --rm
+                    -e WORKSPACE_DIR=/workspace
+                    -e BUILD_NUMBER=%build.number%
+                    -e BUILD_VCS_NUMBER=%build.vcs.number%
+                    -e AIRFLOW_NAMESPACE=airflow
+                    -e KUBERNETES_SERVICE_HOST=%env.KUBERNETES_SERVICE_HOST%
+                    -e KUBERNETES_SERVICE_PORT=%env.KUBERNETES_SERVICE_PORT%
+                    -v /etc/resolv.conf:/etc/resolv.conf:ro
+                    -v %teamcity.build.checkoutDir%:/workspace:ro
+                    -v /var/run/secrets/kubernetes.io/serviceaccount:/var/run/secrets/kubernetes.io/serviceaccount:ro
+                    airflow-gitsync:%build.number%
+                """.trimIndent()
+            }
+        }
+    }
+    triggers {
+        vcs {
+            triggerRules = """
+                +:pipelines/airflow/dags/**
+                +:docker/airflow-gitsync/**
             """.trimIndent()
+            branchFilter = "+:refs/heads/main"
+            perCheckinTriggering = true
+            enableQueueOptimization = false
         }
     }
 
-    triggers {
-        vcs {
-            branchFilter = "+:refs/heads/*"
-            triggerRules = "+:docker/validate/**"
+    features {
+        perfmon {
         }
     }
 })
 
-object BuildTranscodeImage : BuildType({
-    name = "Build Transcode Image"
-    description = "Build Docker image for media transcoding"
+object MediaPipelineDockerImages : BuildType({
+    name = "Build Media Pipeline Docker Images"
+    description = "Build and push ClamAV, Validate, and Transcode container images for media processing pipeline"
 
     vcs {
-        root(DslContext.settingsRoot)
-    }
-
-    requirements {
-        contains("docker.server.osType", "linux")
+        root(HttpsGithubComKgKhangelaniBabelaphaRefsHeadsMain3)
     }
 
     steps {
         dockerCommand {
-            name = "Build image"
-            commandType = other {
-                subCommand = "build"
-                commandArgs = """
-                -t transcode:%build.number%
-                -t transcode:latest
-                -f docker/transcode/dockerfile
-                docker/transcode
-                """.trimIndent()
+            name = "Build ClamAV Scanner Image"
+            id = "Build_ClamAV_Image"
+            commandType = build {
+                source = file {
+                    path = "docker/clamav/dockerfile"
+                }
+                namesAndTags = "clamav:%build.number%"
+                commandArgs = "--pull"
             }
         }
-
-        script {
-            name = "Load into containerd on all nodes"
-            scriptContent = """
-            # Save image to tar
-            docker save transcode:%build.number% -o /tmp/transcode.tar
-            
-            # Import to local containerd
-            ctr -n k8s.io images import /tmp/transcode.tar
-            
-            # Copy to other nodes and import
-            for node in 192.168.10.12 192.168.10.13 192.168.10.10; do
-                echo "Loading image on node ${'$'}node"
-                scp /tmp/transcode.tar ${'$'}node:/tmp/ || true
-                ssh ${'$'}node "ctr -n k8s.io images import /tmp/transcode.tar && rm /tmp/transcode.tar" || true
-            done
-            
-            # Cleanup
-            rm /tmp/transcode.tar
-            """.trimIndent()
+        dockerCommand {
+            name = "Build Validate Image"
+            id = "Build_Validate_Image"
+            commandType = build {
+                source = file {
+                    path = "docker/validate/dockerfile"
+                }
+                namesAndTags = "validate:%build.number%"
+                commandArgs = "--pull"
+            }
+        }
+        dockerCommand {
+            name = "Build Transcode Image"
+            id = "Build_Transcode_Image"
+            commandType = build {
+                source = file {
+                    path = "docker/transcode/dockerfile"
+                }
+                namesAndTags = "transcode:%build.number%"
+                commandArgs = "--pull"
+            }
+        }
+        dockerCommand {
+            name = "Make Images Available to Kubernetes"
+            id = "Export_Images_For_K8s"
+            commandType = other {
+                subCommand = "tag"
+                commandArgs = "clamav:%build.number% localhost/clamav:latest"
+            }
+        }
+        dockerCommand {
+            name = "Tag Validate for Local Registry"
+            id = "Tag_Validate_Local"
+            commandType = other {
+                subCommand = "tag"
+                commandArgs = "validate:%build.number% localhost/validate:latest"
+            }
+        }
+        dockerCommand {
+            name = "Tag Transcode for Local Registry"
+            id = "Tag_Transcode_Local"
+            commandType = other {
+                subCommand = "tag"
+                commandArgs = "transcode:%build.number% localhost/transcode:latest"
+            }
         }
     }
 
     triggers {
         vcs {
-            branchFilter = "+:refs/heads/*"
-            triggerRules = "+:docker/transcode/**"
+            triggerRules = """
+                +:docker/clamav/**
+                +:docker/validate/**
+                +:docker/transcode/**
+                +:docker/utils/**
+            """.trimIndent()
+            branchFilter = "+:refs/heads/main"
+            perCheckinTriggering = true
+            enableQueueOptimization = false
+        }
+    }
+
+    features {
+        perfmon {
         }
     }
 })
+
