@@ -84,10 +84,15 @@ def ingest_pipeline():
         namespace="airflow",
         image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["python3"],
+        cmds=["bash"],
         arguments=[
             "-c",
             """
+set -e
+# Install boto3
+pip install boto3 -q
+
+python3 << 'EOF'
 import sys
 from pathlib import Path
 import boto3
@@ -131,6 +136,7 @@ except Exception as e:
     sys.exit(1)
 
 sys.exit(0)
+EOF
 """
         ],
         in_cluster=True,
@@ -278,10 +284,15 @@ fi
         namespace="airflow",
         image="python:3.11-slim",
         image_pull_policy="Always",
-        cmds=["python3"],
+        cmds=["bash"],
         arguments=[
             "-c",
             """
+set -e
+# Install boto3
+pip install boto3 -q
+
+python3 << 'EOF'
 import sys
 from pathlib import Path
 import boto3
@@ -340,6 +351,7 @@ try:
 except Exception as e:
     print(f"[upload] ERROR uploading to S3: {str(e)}")
     sys.exit(1)
+EOF
 """
         ],
         in_cluster=True,
