@@ -202,15 +202,21 @@ echo "[transcode] Starting transcoding to HLS + DASH"
 
 mkdir -p /tmp/input /tmp/output/$OBJECT_ID/hls /tmp/output/$OBJECT_ID/dash
 
-# Download input file from MinIO using curl (ffmpeg/jrottenberg image likely has no aws-cli)
+# Download input file from MinIO using wget with basic auth
 echo "[transcode] Downloading input file from MinIO: $S3_INPUT_KEY"
-curl -X GET \
-    -u "$MINIO_ACCESS_KEY:$MINIO_SECRET_KEY" \
-    -o "/tmp/input/$FILENAME" \
-    "$MINIO_ENDPOINT/$S3_BUCKET/$S3_INPUT_KEY"
+wget --http-user="$MINIO_ACCESS_KEY" --http-password="$MINIO_SECRET_KEY" \
+    -O "/tmp/input/$FILENAME" \
+    "$MINIO_ENDPOINT/$S3_BUCKET/$S3_INPUT_KEY" 2>&1 || {
+    echo "[transcode] wget failed, trying with --no-check-certificate..."
+    wget --http-user="$MINIO_ACCESS_KEY" --http-password="$MINIO_SECRET_KEY" \
+        --no-check-certificate \
+        -O "/tmp/input/$FILENAME" \
+        "$MINIO_ENDPOINT/$S3_BUCKET/$S3_INPUT_KEY"
+}
 
 if [ ! -f "/tmp/input/$FILENAME" ]; then
     echo "[transcode] ERROR: Failed to download input file from MinIO"
+    ls -la /tmp/input/ 2>&1
     exit 1
 fi
 
