@@ -114,10 +114,12 @@ export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
 
 aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "$LOCAL_PATH" \
     --endpoint-url="$MINIO_ENDPOINT" \
+    --s3-region us-east-1 \
     --no-sign-request || {
     echo "[download] Retrying with signature..."
     aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "$LOCAL_PATH" \
-        --endpoint-url="$MINIO_ENDPOINT"
+        --endpoint-url="$MINIO_ENDPOINT" \
+        --s3-region us-east-1
 }
 
 if [ -f "$LOCAL_PATH" ]; then
@@ -312,7 +314,8 @@ for file in "$OUTPUT_DIR/hls"/*; do
         FILENAME=$(basename "$file")
         S3_KEY="$S3_OUTPUT_KEY/hls/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
-            --endpoint-url="$MINIO_ENDPOINT" || {
+            --endpoint-url="$MINIO_ENDPOINT" \
+            --s3-region us-east-1 || {
             echo "[upload] Failed to upload $FILENAME"
             exit 1
         }
@@ -327,7 +330,8 @@ for file in "$OUTPUT_DIR/dash"/*; do
         FILENAME=$(basename "$file")
         S3_KEY="$S3_OUTPUT_KEY/dash/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
-            --endpoint-url="$MINIO_ENDPOINT" || {
+            --endpoint-url="$MINIO_ENDPOINT" \
+            --s3-region us-east-1 || {
             echo "[upload] Failed to upload $FILENAME"
             exit 1
         }
