@@ -114,11 +114,9 @@ mkdir -p /tmp/input /tmp/work
 # Download with retries
 aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "/tmp/input/$FILENAME" \
     --endpoint-url="$MINIO_ENDPOINT" \
-    --s3-region us-east-1 \
     --no-sign-request || \
 aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "/tmp/input/$FILENAME" \
-    --endpoint-url="$MINIO_ENDPOINT" \
-    --s3-region us-east-1
+    --endpoint-url="$MINIO_ENDPOINT"
 
 if [ -f "/tmp/input/$FILENAME" ]; then
     echo "[download] Successfully downloaded"
@@ -246,8 +244,7 @@ for file in /tmp/output/$OBJECT_ID/hls/*; do
         FILENAME=$(basename "$file")
         S3_KEY="$S3_OUTPUT_KEY/hls/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
-            --endpoint-url="$MINIO_ENDPOINT" \
-            --s3-region us-east-1 || {
+            --endpoint-url="$MINIO_ENDPOINT" || {
             echo "[upload] Failed to upload HLS: $FILENAME"
             exit 1
         }
@@ -262,8 +259,7 @@ for file in /tmp/output/$OBJECT_ID/dash/*; do
         FILENAME=$(basename "$file")
         S3_KEY="$S3_OUTPUT_KEY/dash/$FILENAME"
         aws s3 cp "$file" "s3://$S3_BUCKET/$S3_KEY" \
-            --endpoint-url="$MINIO_ENDPOINT" \
-            --s3-region us-east-1 || {
+            --endpoint-url="$MINIO_ENDPOINT" || {
             echo "[upload] Failed to upload DASH: $FILENAME"
             exit 1
         }
