@@ -111,10 +111,9 @@ export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
 # Create directories
 mkdir -p /tmp/input /tmp/work
 
-# Download with retries
+# Download with retries (AWS credentials from environment)
 aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "/tmp/input/$FILENAME" \
-    --endpoint-url="$MINIO_ENDPOINT" \
-    --no-sign-request || \
+    --endpoint-url="$MINIO_ENDPOINT" || \
 aws s3 cp "s3://$S3_BUCKET/$S3_KEY" "/tmp/input/$FILENAME" \
     --endpoint-url="$MINIO_ENDPOINT"
 
