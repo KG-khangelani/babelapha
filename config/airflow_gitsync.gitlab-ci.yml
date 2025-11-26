@@ -12,11 +12,20 @@ airflow_gitsync:
   # Make sure your runner mounts /var/run/docker.sock into the job container
   # or is a shell executor with Docker installed.
 
+  # Defaults so pipeline inputs can override if needed
   variables:
-    DAGS_FOLDER: /opt/airflow/dags
-    AIRFLOW_NAMESPACE: airflow
-    AIRFLOW_POD_LABEL: component=scheduler
-    SOURCE_DIR: pipelines/airflow/dags
+    DAGS_FOLDER:
+      value: "/opt/airflow/dags"
+      description: "Target DAGs directory in the Airflow deployment"
+    AIRFLOW_NAMESPACE:
+      value: "airflow"
+      description: "Namespace where Airflow runs"
+    AIRFLOW_POD_LABEL:
+      value: "component=scheduler"
+      description: "Label selector for the scheduler pod"
+    SOURCE_DIR:
+      value: "pipelines/airflow/dags"
+      description: "Local path to DAG sources to sync"
 
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
