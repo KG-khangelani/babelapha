@@ -1,2 +1,3 @@
-include:
-  - local: 'config/*.yml'
+# include:
+#   - local: 'config/*.yml'
+config/*.yml
