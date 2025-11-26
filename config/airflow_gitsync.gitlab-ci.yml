@@ -1,16 +1,16 @@
 # config/airflow-gitsync.gitlab.yml
-# NOTE:
-# - Root .gitlab-ci.yml should define the stages, e.g.:
-#     stages:
-#       - airflow
-#   and include this file.
+# Root .gitlab-ci.yml should define stages and include this file:
+# stages:
+#   - airflow
+# include:
+#   - local: "config/*.yml"
 
 airflow_gitsync:
   stage: airflow
-  image: docker:24.0.5   # just the Docker CLI image, no DinD service
+  image: docker:24.0.5   # Docker CLI image
 
-  # Make sure your runner mounts /var/run/docker.sock into the job container
-  # or is a shell executor with Docker installed.
+  # Assumes the runner has Docker available (e.g. /var/run/docker.sock mounted
+  # or shell executor with Docker installed).
 
   variables:
     DAGS_FOLDER: /opt/airflow/dags
@@ -31,27 +31,16 @@ airflow_gitsync:
     - docker version || echo "WARNING: docker not available on this runner"
 
     - echo "Building validator image..."
-    - >
-      docker build --pull
-      -f docker/airflow-gitsync/Dockerfile.validate
-      -t airflow-dag-validator:${CI_PIPELINE_ID} .
+    - docker build --pull -f docker/airflow-gitsync/Dockerfile.validate -t airflow-dag-validator:${CI_PIPELINE_ID} .
 
     - echo "Validating DAG syntax..."
-    - >
-      docker run --rm
-      -v "${CI_PROJECT_DIR}:/workspace"
-      airflow-dag-validator:${CI_PIPELINE_ID}
+    - docker run --rm -v "${CI_PROJECT_DIR}:/workspace" airflow-dag-validator:${CI_PIPELINE_ID}
 
     - echo "Building GitSync container..."
-    - >
-      docker build --pull
-      -f docker/airflow-gitsync/Dockerfile
-      -t airflow-gitsync:${CI_PIPELINE_ID}
-      -t airflow-gitsync:latest .
+    - docker build --pull -f docker/airflow-gitsync/Dockerfile -t airflow-gitsync:${CI_PIPELINE_ID} -t airflow-gitsync:latest .
 
     - echo "Syncing DAGs to Airflow..."
-    - >
-      docker run --rm \
+    - docker run --rm \
         -e WORKSPACE_DIR=/workspace \
         -e BUILD_NUMBER=${CI_PIPELINE_ID} \
         -e BUILD_VCS_NUMBER=${CI_COMMIT_SHA} \
