@@ -1,80 +1,66 @@
-name: Airflow GitSync
+# config/airflow-gitsync.gitlab.yml
 
-on:
-  push:
-    branches: [ main ]
-    paths:
-      - "pipelines/airflow/dags/**"
-      - "docker/airflow-gitsync/**"
-  workflow_dispatch:
+stages:
+  - airflow
 
-env:
-  DAGS_FOLDER: /opt/airflow/dags
-  AIRFLOW_NAMESPACE: airflow
-  AIRFLOW_POD_LABEL: component=scheduler
-  SOURCE_DIR: pipelines/airflow/dags
-  # If you actually need a token, define a repo secret and map it:
-  # GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_AIRFLOW_GITSYNC }}
+airflow_gitsync:
+  stage: airflow
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
 
-jobs:
-  airflow-gitsync:
-    runs-on: ubuntu-latest
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW_NAMESPACE: airflow
+    AIRFLOW_POD_LABEL: component=scheduler
+    SOURCE_DIR: pipelines/airflow/dags
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # The GitLab equivalent of:
+  # on:
+  #   push:
+  #     branches: [ main ]
+  #     paths: [...]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "pipelines/airflow/dags/**/*"
+        - "docker/airflow-gitsync/**/*"
+      when: on_success
+    - when: never
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  script:
+    - echo "Checkout is implicit in GitLab (repo is already in $CI_PROJECT_DIR)"
+    - echo "Building validator image..."
+    - >
+      docker build --pull
+      -f docker/airflow-gitsync/Dockerfile.validate
+      -t airflow-dag-validator:${CI_PIPELINE_ID} .
 
-      # --- Qodana (disabled in TeamCity) ---
-      # Uncomment and adjust if you want it:
-      # - name: Qodana scan
-      #   uses: JetBrains/qodana-action@v2024.1
-      #   with:
-      #     linter: jetbrains/qodana-python:latest
-      #   env:
-      #     QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+    - echo "Validating DAG syntax..."
+    - >
+      docker run --rm
+      -v "${CI_PROJECT_DIR}:/workspace"
+      airflow-dag-validator:${CI_PIPELINE_ID}
 
-      - name: Build validator image
-        run: |
-          docker build --pull \
-            -f docker/airflow-gitsync/Dockerfile.validate \
-            -t airflow-dag-validator:${{ github.run_number }} .
+    - echo "Building GitSync container..."
+    - >
+      docker build --pull
+      -f docker/airflow-gitsync/Dockerfile
+      -t airflow-gitsync:${CI_PIPELINE_ID}
+      -t airflow-gitsync:latest .
 
-      - name: Validate DAG syntax
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            airflow-dag-validator:${{ github.run_number }}
-
-      - name: Build GitSync container
-        run: |
-          docker build --pull \
-            -f docker/airflow-gitsync/Dockerfile \
-            -t airflow-gitsync:${{ github.run_number }} \
-            -t airflow-gitsync:latest .
-
-      # Optional: network connectivity test (disabled in TeamCity)
-      # - name: Test network connectivity
-      #   run: |
-      #     docker run --rm --network host alpine:latest ping -c 3 github.com
-
-      - name: Sync DAGs to Airflow
-        env:
-          # If the runner is inside the cluster these may already exist.
-          # Otherwise you can inject them via repo/org/environment secrets.
-          KUBERNETES_SERVICE_HOST: ${{ env.KUBERNETES_SERVICE_HOST }}
-          KUBERNETES_SERVICE_PORT: ${{ env.KUBERNETES_SERVICE_PORT }}
-        run: |
-          docker run --rm \
-            -e WORKSPACE_DIR=/workspace \
-            -e BUILD_NUMBER=${{ github.run_number }} \
-            -e BUILD_VCS_NUMBER=${{ github.sha }} \
-            -e AIRFLOW_NAMESPACE="${AIRFLOW_NAMESPACE}" \
-            -e KUBERNETES_SERVICE_HOST="${KUBERNETES_SERVICE_HOST}" \
-            -e KUBERNETES_SERVICE_PORT="${KUBERNETES_SERVICE_PORT}" \
-            -v /etc/resolv.conf:/etc/resolv.conf:ro \
-            -v "${{ github.workspace }}:/workspace:ro" \
-            -v /var/run/secrets/kubernetes.io/serviceaccount:/var/run/secrets/kubernetes.io/serviceaccount:ro \
-            airflow-gitsync:${{ github.run_number }}
+    - echo "Syncing DAGs to Airflow..."
+    - >
+      docker run --rm
+      -e WORKSPACE_DIR=/workspace
+      -e BUILD_NUMBER=${CI_PIPELINE_ID}
+      -e BUILD_VCS_NUMBER=${CI_COMMIT_SHA}
+      -e AIRFLOW_NAMESPACE="${AIRFLOW_NAMESPACE}"
+      -e KUBERNETES_SERVICE_HOST="${KUBERNETES_SERVICE_HOST}"
+      -e KUBERNETES_SERVICE_PORT="${KUBERNETES_SERVICE_PORT}"
+      -v /etc/resolv.conf:/etc/resolv.conf:ro
+      -v "${CI_PROJECT_DIR}:/workspace:ro"
+      -v /var/run/secrets/kubernetes.io/serviceaccount:/var/run/secrets/kubernetes.io/serviceaccount:ro
+      airflow-gitsync:${CI_PIPELINE_ID}
