@@ -1,16 +1,15 @@
 # config/airflow-gitsync.gitlab.yml
-# Root .gitlab-ci.yml should define stages and include this file:
-# stages:
-#   - airflow
-# include:
-#   - local: "config/*.yml"
+# Root .gitlab-ci.yml:
+#   stages:
+#     - airflow
+#   include:
+#     - local: "config/*.yml"
 
 airflow_gitsync:
   stage: airflow
-  image: docker:24.0.5   # Docker CLI image
+  image: docker:24.0.5   # Docker CLI image only
 
-  # Assumes the runner has Docker available (e.g. /var/run/docker.sock mounted
-  # or shell executor with Docker installed).
+  # Runner must have Docker available (socket mount or shell executor).
 
   variables:
     DAGS_FOLDER: /opt/airflow/dags
@@ -27,27 +26,17 @@ airflow_gitsync:
     - when: never
 
   script:
-    - echo "Using host Docker daemon via /var/run/docker.sock (no DinD)."
+    - echo "Using host Docker daemon (no DinD)."
     - docker version || echo "WARNING: docker not available on this runner"
 
     - echo "Building validator image..."
-    - docker build --pull -f docker/airflow-gitsync/Dockerfile.validate -t airflow-dag-validator:${CI_PIPELINE_ID} .
+    - docker build --pull -f docker/airflow-gitsync/Dockerfile.validate -t "airflow-dag-validator:${CI_PIPELINE_ID}" .
 
     - echo "Validating DAG syntax..."
-    - docker run --rm -v "${CI_PROJECT_DIR}:/workspace" airflow-dag-validator:${CI_PIPELINE_ID}
+    - docker run --rm -v "${CI_PROJECT_DIR}:/workspace" "airflow-dag-validator:${CI_PIPELINE_ID}"
 
     - echo "Building GitSync container..."
-    - docker build --pull -f docker/airflow-gitsync/Dockerfile -t airflow-gitsync:${CI_PIPELINE_ID} -t airflow-gitsync:latest .
+    - docker build --pull -f docker/airflow-gitsync/Dockerfile -t "airflow-gitsync:${CI_PIPELINE_ID}" -t "airflow-gitsync:latest" .
 
     - echo "Syncing DAGs to Airflow..."
-    - docker run --rm \
-        -e WORKSPACE_DIR=/workspace \
-        -e BUILD_NUMBER=${CI_PIPELINE_ID} \
-        -e BUILD_VCS_NUMBER=${CI_COMMIT_SHA} \
-        -e AIRFLOW_NAMESPACE="${AIRFLOW_NAMESPACE}" \
-        -e KUBERNETES_SERVICE_HOST="${KUBERNETES_SERVICE_HOST}" \
-        -e KUBERNETES_SERVICE_PORT="${KUBERNETES_SERVICE_PORT}" \
-        -v /etc/resolv.conf:/etc/resolv.conf:ro \
-        -v "${CI_PROJECT_DIR}:/workspace:ro" \
-        -v /var/run/secrets/kubernetes.io/serviceaccount:/var/run/secrets/kubernetes.io/serviceaccount:ro \
-        airflow-gitsync:${CI_PIPELINE_ID}
+    - docker run --rm -e WORKSPACE_DIR=/workspace -e BUILD_NUMBER=${CI_PIPELINE_ID} -e BUILD_VCS_NUMBER=${CI_COMMIT_SHA} -e AIRFLOW_NAMESPACE="${AIRFLOW_NAMESPACE}" -e KUBERNETES_SERVICE_HOST="${KUBERNETES_SERVICE_HOST}" -e KUBERNETES_SERVICE_PORT="${KUBERNETES_SERVICE_PORT}" -v /etc/resolv.conf:/etc/resolv.conf:ro -v "${CI_PROJECT_DIR}:/workspace:ro" -v /var/run/secrets/kubernetes.io/serviceaccount:/var/run/secrets/kubernetes.io/serviceaccount:ro "airflow-gitsync:${CI_PIPELINE_ID}"
