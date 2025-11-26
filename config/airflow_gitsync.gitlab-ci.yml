@@ -28,7 +28,7 @@ airflow_gitsync:
 
   script:
     - echo "Using host Docker daemon via /var/run/docker.sock (no DinD)."
-    - 'docker version || echo "WARNING: docker not available on this runner"'
+    - "docker version || echo 'WARNING: docker not available on this runner'"
 
     - echo "Building validator image..."
     - >
