@@ -1,2 +1,5 @@
+stages:
+  - airflow
+
 include:
   - local: "config/*.yml"
