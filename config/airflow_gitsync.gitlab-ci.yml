@@ -22,13 +22,15 @@ airflow_gitsync:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
-        - "pipelines/airflow/dags/**/*"
-        - "docker/airflow-gitsync/**/*"
+        - pipelines/airflow/dags/**/*
+        - docker/airflow-gitsync/**/*
       when: on_success
-    - when: never
-    - if: '$CI_COMMIT_BRANCH == "web"'
+    # Allow manual/Web UI/API runs even with no diff
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
       when: manual
+      allow_failure: false
     - when: never
+
 
   script:
     - echo "Using host Docker daemon via /var/run/docker.sock (no DinD)."
