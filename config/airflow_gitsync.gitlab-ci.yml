@@ -8,6 +8,8 @@
 airflow_gitsync:
   stage: airflow
   image: docker:24.0.5   # just the Docker CLI image, no DinD service
+  tags:
+    - arm64              # runner tag; matches the online runner (umntu-2)
 
   # Make sure your runner mounts /var/run/docker.sock into the job container
   # or is a shell executor with Docker installed.
@@ -25,9 +27,9 @@ airflow_gitsync:
         - pipelines/airflow/dags/**/*
         - docker/airflow-gitsync/**/*
       when: on_success
-    # Allow manual/Web UI/API runs even with no diff
+    # Allow Web/API runs even with no diff (run automatically)
     - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
-      when: manual
+      when: on_success
       allow_failure: false
     - when: never
 
