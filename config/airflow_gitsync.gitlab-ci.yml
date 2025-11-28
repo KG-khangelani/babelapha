@@ -26,6 +26,9 @@ airflow_gitsync:
         - "docker/airflow-gitsync/**/*"
       when: on_success
     - when: never
+    - if: '$CI_COMMIT_BRANCH == "web"'
+      when: manual
+    - when: never
 
   script:
     - echo "Using host Docker daemon via /var/run/docker.sock (no DinD)."
