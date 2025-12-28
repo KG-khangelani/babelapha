@@ -10,6 +10,7 @@ airflow_gitsync:
   image: docker:24.0.5   # just the Docker CLI image, no DinD service
   tags:
     - arm64              # runner tag; matches the online runner (umntu-2)
+    - khancreate
 
   # Make sure your runner mounts /var/run/docker.sock into the job container
   # or is a shell executor with Docker installed.
