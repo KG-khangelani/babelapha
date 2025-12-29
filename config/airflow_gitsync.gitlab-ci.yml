@@ -41,6 +41,7 @@ airflow_gitsync:
     BUILD_NUMBER: "${CI_PIPELINE_ID}"
     BUILD_VCS_NUMBER: "${CI_COMMIT_SHA}"
     KUBE_SERVER: "https://k8s.khangelani.tech/"
+    KUBE_INSECURE_SKIP_TLS_VERIFY: "true"
   needs:
     - job: airflow_validate
   rules: *airflow_rules
