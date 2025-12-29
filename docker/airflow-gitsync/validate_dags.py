@@ -4,6 +4,7 @@ Validate Airflow DAGs by compiling and loading with Airflow DagBag
 This catches both Python syntax errors and import/parse errors that prevent
 Airflow from displaying DAGs in the UI.
 """
+import os
 import sys
 import py_compile
 from pathlib import Path
@@ -48,7 +49,9 @@ def airflow_parse(folder: Path) -> tuple[int, dict[str, str]]:
 
 
 def main():
-    dag_folder = Path("/workspace/pipelines/airflow/dags")
+    workspace_dir = os.environ.get("WORKSPACE_DIR") or os.environ.get("CI_PROJECT_DIR") or "/workspace"
+    source_dir = os.environ.get("SOURCE_DIR") or "pipelines/airflow/dags"
+    dag_folder = Path(workspace_dir) / source_dir
 
     if not dag_folder.exists():
         print(f"✗ Error: DAG folder not found: {dag_folder}")
