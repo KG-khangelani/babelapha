@@ -12,11 +12,7 @@ airflow_validate:
     entrypoint: [""]
   tags:
     - khancreate
-  variables: &airflow_vars
-    DAGS_FOLDER: "/opt/airflow/dags"
-    AIRFLOW_NAMESPACE: "airflow"
-    AIRFLOW_POD_LABEL: "component=scheduler"
-    SOURCE_DIR: "pipelines/airflow/dags"
+  variables:
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   rules: &airflow_rules
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -40,7 +36,6 @@ airflow_gitsync:
   tags:
     - khancreate
   variables:
-    <<: *airflow_vars
     WORKSPACE_DIR: "${CI_PROJECT_DIR}"
     BUILD_NUMBER: "${CI_PIPELINE_ID}"
     BUILD_VCS_NUMBER: "${CI_COMMIT_SHA}"
