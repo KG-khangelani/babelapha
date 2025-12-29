@@ -8,6 +8,7 @@
 airflow_validate:
   stage: airflow
   image: apache/airflow:3.1.0-python3.11
+  entrypoint: [""]
   tags:
     - khancreate
   variables: &airflow_vars
@@ -33,6 +34,7 @@ airflow_validate:
 airflow_gitsync:
   stage: airflow
   image: bitnami/kubectl:1.29
+  entrypoint: [""]
   tags:
     - khancreate
   variables:
