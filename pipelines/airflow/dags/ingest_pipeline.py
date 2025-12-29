@@ -28,13 +28,15 @@ S3_BUCKET = "pachyderm"
 
 default_args = dict(retries=1)
 
+
 def _create_kpo_task(task_id, image, cmd_script, name_prefix="task", startup_timeout_seconds=300):
     """Factory function to create KubernetesPodOperator tasks with deferred import.
+    
+    This function MUST be called inside a DAG context (within a @dag decorated function).
     
     Args:
         startup_timeout_seconds: How long to wait for pod to start (default 300s = 5 minutes)
     """
-    # Import ONLY when called, not at module level
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     
     return KubernetesPodOperator(
@@ -51,6 +53,7 @@ def _create_kpo_task(task_id, image, cmd_script, name_prefix="task", startup_tim
         node_selector={"kubernetes.io/arch": "amd64"},
         startup_timeout_seconds=startup_timeout_seconds,
     )
+
 
 @dag(
     dag_id="ingest_pipeline",
