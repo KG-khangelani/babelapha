@@ -91,9 +91,18 @@ airflow_gitsync:
           CA_FILE="$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CLUSTER_NAME}\")].cluster.certificate-authority}" 2>/dev/null || true)"
           if [ -n "${CA_DATA}" ]; then
             echo "Embedding certificate-authority-data from kubeconfig"
-            printf '%s' "${CA_DATA}" | base64 -d > /tmp/kube-ca.crt
-            chmod 600 /tmp/kube-ca.crt
-            kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+            if printf '%s' "${CA_DATA}" | grep -q "BEGIN CERTIFICATE"; then
+              printf '%s' "${CA_DATA}" > /tmp/kube-ca.crt
+            else
+              if ! printf '%s' "${CA_DATA}" | base64 -d > /tmp/kube-ca.crt 2>/dev/null; then
+                echo "WARNING: Failed to decode certificate-authority-data; leaving CA unchanged."
+                rm -f /tmp/kube-ca.crt
+              fi
+            fi
+            if [ -f /tmp/kube-ca.crt ]; then
+              chmod 600 /tmp/kube-ca.crt
+              kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+            fi
           elif [ -n "${CA_FILE}" ] && [ -f "${CA_FILE}" ]; then
             echo "Embedding certificate-authority file from kubeconfig: ${CA_FILE}"
             kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority="${CA_FILE}" --embed-certs=true >/dev/null
