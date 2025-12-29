@@ -40,12 +40,18 @@ airflow_gitsync:
     WORKSPACE_DIR: "${CI_PROJECT_DIR}"
     BUILD_NUMBER: "${CI_PIPELINE_ID}"
     BUILD_VCS_NUMBER: "${CI_COMMIT_SHA}"
+    KUBE_SERVER: "https://k8s.khangelani.tech/"
   needs:
     - job: airflow_validate
   rules: *airflow_rules
   before_script:
     - |
-      if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
+      if [ -n "${KUBECONFIG_CONTENT_B64:-}" ]; then
+        echo "Decoding KUBECONFIG_CONTENT_B64 to /tmp/kubeconfig"
+        printf '%s' "${KUBECONFIG_CONTENT_B64}" | base64 -d > /tmp/kubeconfig
+        chmod 600 /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+      elif [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
         echo "Using in-cluster service account"
       elif [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
         echo "Using KUBECONFIG file variable"
@@ -57,6 +63,21 @@ airflow_gitsync:
       else
         echo "✗ No Kubernetes credentials found. Set KUBECONFIG (file variable) or KUBECONFIG_CONTENT."
         exit 1
+      fi
+      if [ -n "${KUBE_SERVER:-}" ]; then
+        CURRENT_CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
+        if [ -n "${CURRENT_CONTEXT}" ]; then
+          CLUSTER_NAME="$(kubectl config view -o jsonpath="{.contexts[?(@.name==\"${CURRENT_CONTEXT}\")].context.cluster}")"
+        fi
+        if [ -z "${CLUSTER_NAME:-}" ]; then
+          CLUSTER_NAME="$(kubectl config view -o jsonpath='{.clusters[0].name}')"
+        fi
+        if [ -z "${CLUSTER_NAME:-}" ]; then
+          echo "✗ Could not determine cluster name to update kubeconfig server."
+          exit 1
+        fi
+        echo "Setting kubeconfig server to ${KUBE_SERVER} for cluster ${CLUSTER_NAME}"
+        kubectl config set-cluster "${CLUSTER_NAME}" --server="${KUBE_SERVER}" >/dev/null
       fi
   script:
     - bash docker/airflow-gitsync/sync-to-airflow.sh
