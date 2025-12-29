@@ -78,6 +78,29 @@ airflow_gitsync:
         fi
         echo "Setting kubeconfig server to ${KUBE_SERVER} for cluster ${CLUSTER_NAME}"
         kubectl config set-cluster "${CLUSTER_NAME}" --server="${KUBE_SERVER}" >/dev/null
+        if [ -n "${KUBE_CA_B64:-}" ]; then
+          echo "Applying KUBE_CA_B64 to kubeconfig"
+          printf '%s' "${KUBE_CA_B64}" | base64 -d > /tmp/kube-ca.crt
+          chmod 600 /tmp/kube-ca.crt
+          kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+        elif [ "${KUBE_INSECURE_SKIP_TLS_VERIFY:-}" = "true" ]; then
+          echo "WARNING: TLS verification disabled for cluster ${CLUSTER_NAME}"
+          kubectl config set-cluster "${CLUSTER_NAME}" --insecure-skip-tls-verify=true >/dev/null
+        else
+          CA_DATA="$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CLUSTER_NAME}\")].cluster.certificate-authority-data}" 2>/dev/null || true)"
+          CA_FILE="$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CLUSTER_NAME}\")].cluster.certificate-authority}" 2>/dev/null || true)"
+          if [ -n "${CA_DATA}" ]; then
+            echo "Embedding certificate-authority-data from kubeconfig"
+            printf '%s' "${CA_DATA}" | base64 -d > /tmp/kube-ca.crt
+            chmod 600 /tmp/kube-ca.crt
+            kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+          elif [ -n "${CA_FILE}" ] && [ -f "${CA_FILE}" ]; then
+            echo "Embedding certificate-authority file from kubeconfig: ${CA_FILE}"
+            kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority="${CA_FILE}" --embed-certs=true >/dev/null
+          else
+            echo "WARNING: No CA data found in kubeconfig; set KUBE_CA_B64 or KUBE_INSECURE_SKIP_TLS_VERIFY=true."
+          fi
+        fi
       fi
   script:
     - bash docker/airflow-gitsync/sync-to-airflow.sh
