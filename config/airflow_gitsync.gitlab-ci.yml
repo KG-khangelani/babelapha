@@ -35,7 +35,7 @@ airflow_validate:
 airflow_gitsync:
   stage: airflow
   image:
-    name: bitnami/kubectl:1.29
+    name: bitnami/kubectl:latest
     entrypoint: [""]
   tags:
     - khancreate
