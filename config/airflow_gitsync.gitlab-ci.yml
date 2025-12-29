@@ -47,5 +47,20 @@ airflow_gitsync:
   needs:
     - job: airflow_validate
   rules: *airflow_rules
+  before_script:
+    - |
+      if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
+        echo "Using in-cluster service account"
+      elif [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
+        echo "Using KUBECONFIG file variable"
+      elif [ -n "${KUBECONFIG_CONTENT:-}" ]; then
+        echo "Writing KUBECONFIG_CONTENT to /tmp/kubeconfig"
+        printf '%s' "${KUBECONFIG_CONTENT}" > /tmp/kubeconfig
+        chmod 600 /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+      else
+        echo "✗ No Kubernetes credentials found. Set KUBECONFIG (file variable) or KUBECONFIG_CONTENT."
+        exit 1
+      fi
   script:
     - bash docker/airflow-gitsync/sync-to-airflow.sh
