@@ -1,25 +1,42 @@
-# config/airflow-gitsync.gitlab.yml
-# NOTE:
-# - Root .gitlab-ci.yml should define the stages, e.g.:
-#     stages:
-#       - airflow
-#   and include this file.
+spec:
+  inputs:
+    tags:
+      type: array
+      default:
+        - "khancreate"
+    dags_folder:
+      type: string
+      default: "/opt/airflow/dags"
+    airflow_namespace:
+      type: string
+      default: "airflow"
+    airflow_pod_label:
+      type: string
+      default: "component=scheduler"
+    source_dir:
+      type: string
+      default: "pipelines/airflow/dags"
+    rules_branch:
+      type: string
+      default: "main"
+    kubeconfig_content:
+      type: string
+      default: ""
 
 airflow_validate:
   stage: airflow
   image:
     name: apache/airflow:3.1.0-python3.11
     entrypoint: [""]
-  tags:
-    - khancreate
+  tags: [[ inputs.tags ]]
   variables: &airflow_vars
-    DAGS_FOLDER: "/opt/airflow/dags"
-    AIRFLOW_NAMESPACE: "airflow"
-    AIRFLOW_POD_LABEL: "component=scheduler"
-    SOURCE_DIR: "pipelines/airflow/dags"
+    DAGS_FOLDER: "$[[ inputs.dags_folder ]]"
+    AIRFLOW_NAMESPACE: "$[[ inputs.airflow_namespace ]]"
+    AIRFLOW_POD_LABEL: "$[[ inputs.airflow_pod_label ]]"
+    SOURCE_DIR: "$[[ inputs.source_dir ]]"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   rules: &airflow_rules
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "$[[ inputs.rules_branch ]]"'
       changes:
         - pipelines/airflow/dags/**/*
         - docker/airflow-gitsync/**/*
@@ -37,8 +54,7 @@ airflow_gitsync:
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  tags:
-    - khancreate
+  tags: [[ inputs.tags ]]
   variables:
     <<: *airflow_vars
     WORKSPACE_DIR: "${CI_PROJECT_DIR}"
@@ -49,6 +65,9 @@ airflow_gitsync:
   rules: *airflow_rules
   before_script:
     - |
+      if [ -n "$[[ inputs.kubeconfig_content ]]" ]; then
+        export KUBECONFIG_CONTENT="$[[ inputs.kubeconfig_content ]]"
+      fi
       if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
         echo "Using in-cluster service account"
       elif [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
