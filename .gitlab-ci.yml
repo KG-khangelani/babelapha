@@ -2,4 +2,4 @@ stages:
   - airflow
 
 include:
-  - local: "config/*.yml"
+  - component: "$CI_SERVER_HOST/$CI_PROJECT_PATH/config/airflow_gitsync.gitlab-ci.yml@$CI_COMMIT_SHA"
