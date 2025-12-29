@@ -14,8 +14,7 @@ Pipeline Flow:
 """
 
 import os
-import sys
-from airflow.sdk import dag, task
+from airflow.sdk import dag, task, get_current_context
 
 # Suppress slow imports during DAG parsing by setting environment variables
 # This tells the Kubernetes client to skip some initialization
@@ -66,9 +65,11 @@ def ingest_pipeline():
     """Media ingestion pipeline with full processing workflow."""
 
     @task
-    def validate_inputs(**context):
+    def validate_inputs():
         """Validate input parameters from DAG config."""
-        dag_run_conf = context.get('dag_run').conf or {}
+        context = get_current_context()
+        dag_run = context.get('dag_run')
+        dag_run_conf = dag_run.conf or {} if dag_run else {}
         
         # Extract parameters
         object_id = dag_run_conf.get('id', '')
@@ -318,9 +319,11 @@ exit 0
     )
 
     @task
-    def mark_complete(**context):
+    def mark_complete():
         """Mark pipeline as completed."""
-        conf = context.get('dag_run').conf or {}
+        context = get_current_context()
+        dag_run = context.get('dag_run')
+        conf = dag_run.conf or {} if dag_run else {}
         object_id = conf.get('id', 'unknown')
         print(f"[complete] Pipeline successfully completed for object_id={object_id}")
         return f"ingest_completed_{object_id}"
@@ -332,4 +335,3 @@ exit 0
 ingest_pipeline()
 
 ## Boza fe2, cool test sign, test again test again test
-

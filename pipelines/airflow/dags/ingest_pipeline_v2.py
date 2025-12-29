@@ -8,7 +8,7 @@ Architecture:
 - Pure Python for control flow, KPO only for actual processing
 - Deferred KubernetesPodOperator import to avoid slow provider initialization
 """
-from airflow.sdk import dag, task
+from airflow.sdk import dag, task, get_current_context
 import os
 from datetime import datetime
 
@@ -32,9 +32,11 @@ def ingest_pipeline_v2():
     from kubernetes.client import models as k8s
     
     @task
-    def validate_inputs(**context):
+    def validate_inputs():
         """Validate that required parameters are present."""
-        conf = context.get('dag_run').conf or {}
+        context = get_current_context()
+        dag_run = context.get('dag_run')
+        conf = dag_run.conf or {} if dag_run else {}
         obj_id = conf.get('id', 'default-id')
         filename = conf.get('filename', 'default.mp4')
         
@@ -49,7 +51,7 @@ def ingest_pipeline_v2():
         }
 
     @task
-    def stage_info(stage_name: str, **context):
+    def stage_info(stage_name: str):
         """Log stage execution info."""
         print(f"\n{'='*60}")
         print(f"[STAGE] {stage_name}")
