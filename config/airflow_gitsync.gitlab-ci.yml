@@ -19,6 +19,7 @@ airflow_validate:
       changes:
         - pipelines/airflow/dags/**/*
         - docker/airflow-gitsync/**/*
+        - config/*.yml
       when: on_success
     # Allow Web/API runs even with no diff (run automatically)
     - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
