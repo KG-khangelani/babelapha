@@ -28,7 +28,7 @@ airflow_validate:
   image:
     name: apache/airflow:3.1.0-python3.11
     entrypoint: [""]
-  tags: $[[ inputs.tags ]]
+  tags: [[ inputs.tags ]]
   variables: &airflow_vars
     DAGS_FOLDER: "$[[ inputs.dags_folder ]]"
     AIRFLOW_NAMESPACE: "$[[ inputs.airflow_namespace ]]"
@@ -54,7 +54,7 @@ airflow_gitsync:
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  tags: $[[ inputs.tags ]]
+  tags: [[ inputs.tags ]]
   variables:
     <<: *airflow_vars
     WORKSPACE_DIR: "${CI_PROJECT_DIR}"
