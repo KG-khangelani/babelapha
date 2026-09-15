@@ -483,6 +483,7 @@ def render_text(view: dict) -> str:
             decision = record["decision"]
             execution = record["execution"]
             container = execution["container"]
+            parameters = execution["parameters"]
             delivery = view["openlineage_delivery"]["by_manifest_id"][record["manifest_id"]]
             lines.extend(
                 [
@@ -499,8 +500,10 @@ def render_text(view: dict) -> str:
             lines.extend(
                 [
                     "    execution:",
-                    f"      git={execution['git']['repository']}@{_value(execution['git']['commit'])}",
-                    f"      code={execution['code']['path']} sha256={_value(execution['code']['sha256'])}",
+                    f"      git={execution['git']['repository']}@{_value(execution['git']['commit'])} "
+                    f"identity={parameters.get('git_identity_status', 'LEGACY_UNSPECIFIED')}",
+                    f"      code={execution['code']['path']} sha256={_value(execution['code']['sha256'])} "
+                    f"bundle_sha256={_value(parameters.get('dag_code_bundle_sha256'))}",
                     "      "
                     f"container={container['image']} digest={_value(container['digest'])} "
                     f"identity={container['identity_status']}",

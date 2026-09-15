@@ -62,6 +62,15 @@ echo "  Files to sync:"
 ls -lh "${SOURCE_PATH}"/*.py 2>/dev/null || echo "  No .py files found"
 echo ''
 
+git config --global --add safe.directory "${WORKSPACE_DIR}"
+IDENTITY_FILE=$(mktemp)
+python3 "${WORKSPACE_DIR}/pipelines/airflow/create_code_identity.py" \
+    --source-dir "${SOURCE_PATH}" \
+    --git-commit "${DEPLOYED_GIT_SHA}" \
+    --output "${IDENTITY_FILE}"
+echo "✓ Verified Git commit against the complete source DAG bundle"
+echo ''
+
 # Find Airflow scheduler pod
 echo 'Finding Airflow scheduler pod...'
 echo "  Namespace: ${AIRFLOW_NAMESPACE}"
@@ -164,21 +173,24 @@ EOF
     COPY_POD_NAME="${SYNC_POD}"
 fi
 
-# Sync DAG files
+# Sync DAG files. Copy provenance.py first so a mixed deployment stops trusting
+# the legacy unbound SHA before any other DAG file can advance.
 echo ''
 echo "Syncing DAGs to ${DAGS_FOLDER} (mode: ${COPY_TARGET_MODE})..."
-IDENTITY_FILE=$(mktemp)
-printf '%s\n' "${DEPLOYED_GIT_SHA}" > "${IDENTITY_FILE}"
 kubectl exec -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} -- mkdir -p ${DAGS_FOLDER} || true
-kubectl cp "${IDENTITY_FILE}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/.babelapha-git-sha"
-rm -f "${IDENTITY_FILE}"
-echo "  → Recorded deployed Git identity: ${DEPLOYED_GIT_SHA}"
 DAG_COUNT=0
+if [ -f "${SOURCE_PATH}/provenance.py" ]; then
+    echo "  → Copying provenance.py"
+    kubectl cp "${SOURCE_PATH}/provenance.py" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/provenance.py"
+    DAG_COUNT=$((DAG_COUNT + 1))
+fi
 for dag_file in "${SOURCE_PATH}"/*.py; do
     if [ -f "${dag_file}" ]; then
         DAG_NAME=$(basename "${dag_file}")
+        if [ "${DAG_NAME}" = "provenance.py" ]; then
+            continue
+        fi
         echo "  → Copying ${DAG_NAME}"
-        kubectl exec -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} -- mkdir -p ${DAGS_FOLDER} || true
         kubectl cp "${dag_file}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/${DAG_NAME}"
         DAG_COUNT=$((DAG_COUNT + 1))
     fi
@@ -192,6 +204,16 @@ if [ ${DAG_COUNT} -eq 0 ]; then
     fi
     exit 1
 fi
+
+# Publish the bundle binding only after every DAG file has arrived. Until this
+# point, the runtime reports Git identity as unverified if old and new files are
+# mixed. The one-line file remains for older deployed provenance modules only.
+kubectl cp "${IDENTITY_FILE}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/.babelapha-code-identity.json"
+LEGACY_IDENTITY_FILE=$(mktemp)
+printf '%s\n' "${DEPLOYED_GIT_SHA}" > "${LEGACY_IDENTITY_FILE}"
+kubectl cp "${LEGACY_IDENTITY_FILE}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/.babelapha-git-sha"
+rm -f "${IDENTITY_FILE}" "${LEGACY_IDENTITY_FILE}"
+echo "  → Published verified DAG bundle identity: ${DEPLOYED_GIT_SHA}"
 
 if [ "${COPY_TARGET_MODE}" = "sync-pod" ]; then
     echo "  Cleaning up sync pod..."

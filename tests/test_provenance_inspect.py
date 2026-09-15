@@ -70,6 +70,11 @@ def sample_record(
     dag_id="ingest_pipeline",
     parameters=None,
 ):
+    if parameters is None:
+        parameters = {
+            "dag_code_bundle_sha256": "e" * 64,
+            "git_identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+        }
     source = provenance.artifact(
         "s3://pachyderm/incoming/interview-042/interview.mp4",
         sha256="a" * 64,
@@ -165,7 +170,9 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "pachyderm_commit=pachyderm-commit-42",
             "s3_version=version-42",
             "git=https://github.com/KG-khangelani/babelapha@" + "b" * 40,
+            "identity=VERIFIED_BUNDLE_ATTESTATION",
             "code=/opt/airflow/dags/ingest_pipeline.py sha256=" + "c" * 64,
+            "bundle_sha256=" + "e" * 64,
             "container=registry/validate digest=sha256:" + "d" * 64,
         ):
             self.assertIn(expected, rendered)

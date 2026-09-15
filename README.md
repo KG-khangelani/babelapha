@@ -73,10 +73,22 @@ npm run dev
 
 ### 3. Run the local pipeline stack via Docker Compose (Airflow + MinIO)
 
-Use the compose stack to run the local pipeline stack:
+On Windows/PowerShell, start the stack through the identity-verifying launcher:
+
+```powershell
+Copy-Item .env.example .env
+.\scripts\Start-TransparentLocalStack.ps1
+```
+
+The launcher requires the DAG bundle to match a clean Git commit, builds the
+Airflow and provenance API images, injects the exact running Airflow image ID,
+and verifies those identities after startup. This is the recommended path for
+provenance-bearing runs.
+
+The basic portable Compose path remains available when exact local Git and
+container identity is not required:
 
 ```bash
-# one-time: create your env file (optional but recommended)
 cp .env.example .env
 docker compose up --build -d
 ```

@@ -3,6 +3,7 @@ FROM alpine:3.24.1
 RUN apk add --no-cache \
     bash \
     git \
+    python3 \
     curl \
     kubectl \
     ca-certificates

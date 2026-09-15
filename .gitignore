@@ -150,6 +150,8 @@ Thumbs.db
 .cache
 coverage/
 reports/
+pipelines/airflow/dags/.babelapha-code-identity.json
+pipelines/airflow/dags/.babelapha-git-sha
 
 # Ignore secrets and credentials backups
 secrets/

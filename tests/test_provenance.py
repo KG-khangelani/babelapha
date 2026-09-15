@@ -130,6 +130,30 @@ class ProvenanceContractTests(unittest.TestCase):
         with self.assertRaises(provenance.ManifestValidationError):
             provenance.validate_manifest(false_identity)
 
+        false_git = self.sample_manifest(
+            git_commit="a" * 40,
+            parameters={
+                "dag_code_bundle_sha256": "b" * 64,
+                "git_identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+            },
+        )
+        false_git["execution"]["parameters"]["git_identity_status"] = (
+            "UNVERIFIED_CONFIGURED_ASSERTION"
+        )
+        with self.assertRaisesRegex(provenance.ManifestValidationError, "cannot claim"):
+            provenance.validate_manifest(false_git)
+
+        incomplete_git = self.sample_manifest(
+            git_commit="a" * 40,
+            parameters={
+                "dag_code_bundle_sha256": "b" * 64,
+                "git_identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+            },
+        )
+        incomplete_git["execution"]["parameters"].pop("dag_code_bundle_sha256")
+        with self.assertRaisesRegex(provenance.ManifestValidationError, "requires"):
+            provenance.validate_manifest(incomplete_git)
+
         mismatched_commit = self.sample_manifest(
             inputs=[
                 provenance.artifact(
@@ -243,12 +267,51 @@ class ProvenanceContractTests(unittest.TestCase):
         with self.assertRaises(provenance.ManifestValidationError):
             self.sample_manifest(git_commit="local-working-tree")
 
-    def test_deployed_git_identity_file_preserves_exact_synced_commit(self):
+    def test_deployed_git_identity_requires_the_matching_code_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
-            identity_file = Path(directory) / ".babelapha-git-sha"
-            identity_file.write_text("A" * 40 + "\n", encoding="utf-8")
+            source_dir = Path(directory)
+            (source_dir / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+            identity = provenance.build_code_identity("a" * 40, source_dir)
+            identity_file = source_dir / provenance.CODE_IDENTITY_FILENAME
+            identity_file.write_text(json.dumps(identity), encoding="utf-8")
             with mock.patch.dict("os.environ", {}, clear=True):
-                self.assertEqual(provenance._git_commit(identity_file), "a" * 40)
+                self.assertEqual(
+                    provenance._git_commit(identity_file, source_dir=source_dir),
+                    "a" * 40,
+                )
+
+            (source_dir / "example.py").write_text("VALUE = 2\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {"BABELAPHA_GIT_SHA": "a" * 40}, clear=True):
+                commit, status = provenance._git_identity(
+                    source_dir=source_dir,
+                    identity_file=identity_file,
+                )
+            self.assertIsNone(commit)
+            self.assertEqual(status, "UNVERIFIED_CONFIGURED_ASSERTION")
+
+    def test_code_bundle_identity_detects_changed_added_and_removed_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source_dir = Path(directory)
+            first = source_dir / "first.py"
+            second = source_dir / "second.py"
+            first.write_text("FIRST = 1\n", encoding="utf-8")
+            second.write_text("SECOND = 2\n", encoding="utf-8")
+            identity = provenance.build_code_identity("b" * 40, source_dir)
+            provenance.validate_code_identity(identity, source_dir)
+
+            first.write_text("FIRST = 3\n", encoding="utf-8")
+            with self.assertRaisesRegex(provenance.ManifestValidationError, "differs"):
+                provenance.validate_code_identity(identity, source_dir)
+            first.write_text("FIRST = 1\n", encoding="utf-8")
+
+            (source_dir / "third.py").write_text("THIRD = 3\n", encoding="utf-8")
+            with self.assertRaisesRegex(provenance.ManifestValidationError, "differs"):
+                provenance.validate_code_identity(identity, source_dir)
+            (source_dir / "third.py").unlink()
+
+            second.unlink()
+            with self.assertRaisesRegex(provenance.ManifestValidationError, "differs"):
+                provenance.validate_code_identity(identity, source_dir)
 
     def test_persistence_is_atomically_append_only_and_idempotent(self):
         class FakeS3:

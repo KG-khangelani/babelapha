@@ -1,6 +1,6 @@
 # Airflow GitSync Setup
 
-This GitSync container automatically syncs DAGs from the Git repository to your Airflow deployment running in the same Kubernetes cluster.
+This GitSync container automatically syncs DAGs from the Git repository to your Airflow deployment running in the same Kubernetes cluster. It verifies that `BUILD_VCS_NUMBER` matches a clean checkout, hashes every DAG Python file, copies `provenance.py` first, and publishes the commit-to-bundle identity only after all DAG files arrive.
 
 ## Docker Containers
 
@@ -89,6 +89,7 @@ docker run --rm \
 | `AIRFLOW_POD_LABEL` | `component=scheduler` | Scheduler pod label |
 | `DAGS_FOLDER` | `/opt/airflow/dags` | DAGs directory in pod |
 | `SOURCE_DIR` | `pipelines/airflow/dags` | Source directory in repo |
+| `BUILD_VCS_NUMBER` | required | Full commit SHA that must match the clean checked-out DAG bundle |
 
 ## Verify Sync
 
@@ -96,6 +97,7 @@ docker run --rm \
 # Check DAGs in Airflow
 kubectl get pods -n airflow -l component=scheduler
 kubectl exec -n airflow <scheduler-pod> -- ls -lh /opt/airflow/dags/
+kubectl exec -n airflow <scheduler-pod> -- cat /opt/airflow/dags/.babelapha-code-identity.json
 kubectl exec -n airflow <scheduler-pod> -- airflow dags list
 ```
 

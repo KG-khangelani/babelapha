@@ -22,6 +22,8 @@ import uuid
 
 
 SCHEMA_VERSION = "1.0.0"
+CODE_IDENTITY_VERSION = "1.0.0"
+CODE_IDENTITY_FILENAME = ".babelapha-code-identity.json"
 PRODUCER = "https://github.com/KG-khangelani/babelapha"
 CONTRACTS_COMMIT = "089e23c53303b0c4b5298b12fdda11f646e3ff2b"
 DELIVERY_CONTRACTS_COMMIT = "ea9f16f30ae2facc8e5215c8156e1458bc969f87"
@@ -178,6 +180,74 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _code_bundle_sha256(files: dict[str, str]) -> str:
+    body = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def code_bundle_identity(source_dir: str | Path) -> dict:
+    """Hash every Python file that can participate in a parsed DAG bundle."""
+    directory = Path(source_dir)
+    files = {
+        path.name: sha256_file(path)
+        for path in sorted(directory.glob("*.py"), key=lambda item: item.name)
+        if path.is_file()
+    }
+    if not files:
+        raise ManifestValidationError(f"No Python files found in DAG bundle: {directory}")
+    return {"files": files, "bundle_sha256": _code_bundle_sha256(files)}
+
+
+def build_code_identity(git_commit: str, source_dir: str | Path) -> dict:
+    """Bind one exact Git commit to the complete deployed DAG code bundle."""
+    commit = str(git_commit).strip().lower()
+    if not GIT_SHA_RE.fullmatch(commit):
+        raise ManifestValidationError("Code identity requires a full Git commit SHA")
+    bundle = code_bundle_identity(source_dir)
+    return {
+        "schema_version": CODE_IDENTITY_VERSION,
+        "git_commit": commit,
+        "bundle_sha256": bundle["bundle_sha256"],
+        "files": bundle["files"],
+    }
+
+
+def validate_code_identity(identity: object, source_dir: str | Path) -> None:
+    """Prove an identity sidecar still matches every deployed DAG Python file."""
+    required = {"schema_version", "git_commit", "bundle_sha256", "files"}
+    if not isinstance(identity, dict) or set(identity) != required:
+        raise ManifestValidationError("Code identity fields do not match the v1 contract")
+    if identity["schema_version"] != CODE_IDENTITY_VERSION:
+        raise ManifestValidationError("Unsupported code identity version")
+    if not isinstance(identity["git_commit"], str) or not GIT_SHA_RE.fullmatch(
+        identity["git_commit"]
+    ):
+        raise ManifestValidationError("Code identity Git commit is invalid")
+    files = identity["files"]
+    if (
+        not isinstance(files, dict)
+        or not files
+        or any(
+            not isinstance(name, str)
+            or Path(name).name != name
+            or not name.endswith(".py")
+            or not isinstance(digest, str)
+            or not SHA256_RE.fullmatch(digest)
+            for name, digest in files.items()
+        )
+    ):
+        raise ManifestValidationError("Code identity file hashes are invalid")
+    if not isinstance(identity["bundle_sha256"], str) or not SHA256_RE.fullmatch(
+        identity["bundle_sha256"]
+    ):
+        raise ManifestValidationError("Code identity bundle SHA-256 is invalid")
+    if identity["bundle_sha256"] != _code_bundle_sha256(files):
+        raise ManifestValidationError("Code identity bundle SHA-256 does not match its file map")
+    actual = code_bundle_identity(source_dir)
+    if actual["files"] != files or actual["bundle_sha256"] != identity["bundle_sha256"]:
+        raise ManifestValidationError("Deployed DAG bundle differs from its Git identity attestation")
 
 
 def artifact(
@@ -540,6 +610,28 @@ def validate_manifest(record: dict) -> None:
     git_commit = git.get("commit")
     if git_commit is not None and not GIT_SHA_RE.fullmatch(git_commit):
         raise ManifestValidationError("Git commit must be a full 40- or 64-character lowercase SHA")
+    bundle_sha = parameters.get("dag_code_bundle_sha256")
+    if bundle_sha is not None and (
+        not isinstance(bundle_sha, str) or not SHA256_RE.fullmatch(bundle_sha)
+    ):
+        raise ManifestValidationError("DAG code bundle SHA-256 is invalid")
+    git_identity_status = parameters.get("git_identity_status")
+    if git_identity_status is not None:
+        valid_git_identity_statuses = {
+            "VERIFIED_BUNDLE_ATTESTATION",
+            "VERIFIED_CLEAN_GIT_WORKTREE",
+            "UNVERIFIED_CONFIGURED_ASSERTION",
+            "UNVERIFIED",
+        }
+        if git_identity_status not in valid_git_identity_statuses:
+            raise ManifestValidationError("Git identity status is invalid")
+        verified_git = git_identity_status.startswith("VERIFIED_")
+        if verified_git and (git_commit is None or bundle_sha is None):
+            raise ManifestValidationError(
+                "Verified Git identity requires a commit and DAG bundle SHA-256"
+            )
+        if not verified_git and git_commit is not None:
+            raise ManifestValidationError("Unverified Git identity cannot claim a commit")
     orchestrator = record["orchestrator"]
     if not isinstance(orchestrator, dict) or set(orchestrator) != {"name", "version"}:
         raise ManifestValidationError("Manifest orchestrator fields do not match the v1 contract")
@@ -1090,27 +1182,79 @@ def _dag_code_identity(context: dict) -> tuple[str, str | None]:
         return str(path), None
 
 
-def _git_commit(identity_file: str | Path | None = None) -> str | None:
-    configured = os.environ.get("BABELAPHA_GIT_SHA")
-    if configured and GIT_SHA_RE.fullmatch(configured.strip().lower()):
-        return configured.strip().lower()
-    deployed_identity = Path(identity_file) if identity_file else Path(__file__).with_name(".babelapha-git-sha")
+def repository_git_commit(source_dir: str | Path) -> str | None:
+    """Return HEAD only when the complete DAG directory is clean at that commit."""
+    directory = Path(source_dir).resolve()
     try:
-        deployed_commit = deployed_identity.read_text(encoding="utf-8").strip().lower()
-        if GIT_SHA_RE.fullmatch(deployed_commit):
-            return deployed_commit
-    except OSError:
-        pass
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+        root = Path(
+            subprocess.run(
+                ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ).stdout.strip()
+        ).resolve()
+        relative = directory.relative_to(root).as_posix()
+        status = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--",
+                relative,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout
+        if status.strip():
+            return None
+        commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
             timeout=2,
         ).stdout.strip().lower()
-    except (OSError, subprocess.SubprocessError):
+        return commit if GIT_SHA_RE.fullmatch(commit) else None
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+def _git_identity(
+    *,
+    source_dir: str | Path | None = None,
+    identity_file: str | Path | None = None,
+) -> tuple[str | None, str]:
+    """Resolve a Git claim only from matching code, never from an environment assertion alone."""
+    directory = Path(source_dir or Path(__file__).parent).resolve()
+    deployed_identity = Path(identity_file) if identity_file else directory / CODE_IDENTITY_FILENAME
+    try:
+        identity = json.loads(deployed_identity.read_text(encoding="utf-8"))
+        validate_code_identity(identity, directory)
+        return identity["git_commit"], "VERIFIED_BUNDLE_ATTESTATION"
+    except (OSError, json.JSONDecodeError, ManifestValidationError):
+        pass
+
+    commit = repository_git_commit(directory)
+    if commit:
+        return commit, "VERIFIED_CLEAN_GIT_WORKTREE"
+    configured = os.environ.get("BABELAPHA_GIT_SHA", "").strip().lower()
+    status = "UNVERIFIED_CONFIGURED_ASSERTION" if configured else "UNVERIFIED"
+    return None, status
+
+
+def _git_commit(
+    identity_file: str | Path | None = None,
+    source_dir: str | Path | None = None,
+) -> str | None:
+    """Compatibility wrapper for callers that need only the verified commit."""
+    return _git_identity(source_dir=source_dir, identity_file=identity_file)[0]
 
 
 def _duration_ms(started: datetime | None, completed: datetime) -> int | None:
@@ -1187,6 +1331,9 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             "message": decision.get("message", "Task completed successfully"),
         }
     code_path, code_sha = _dag_code_identity(context)
+    dag_source_dir = Path(__file__).resolve().parent
+    code_bundle = code_bundle_identity(dag_source_dir)
+    git_commit, git_identity_status = _git_identity(source_dir=dag_source_dir)
     task_image = getattr(task, "image", None)
     if task_image:
         image = str(task_image)
@@ -1221,7 +1368,7 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
         started_at=started,
         completed_at=completed,
         duration_ms=_duration_ms(started, completed),
-        git_commit=_git_commit(),
+        git_commit=git_commit,
         code_path=code_path,
         code_sha256=code_sha,
         container_image=image,
@@ -1230,6 +1377,8 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             "object_id": object_id,
             "filename": filename,
             "pachyderm_commit": pachyderm_commit,
+            "dag_code_bundle_sha256": code_bundle["bundle_sha256"],
+            "git_identity_status": git_identity_status,
             **(
                 {"pipeline_task_contract": pipeline_task_contract(dag_id)}
                 if dag_id in PIPELINE_TASK_CONTRACTS

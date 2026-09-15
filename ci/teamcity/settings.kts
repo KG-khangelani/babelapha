@@ -21,6 +21,8 @@ object AirflowGitSync : BuildType({
 
     vcs {
         root(HttpsGithubComKgKhangelaniBabelaphaRefsHeadsMain3)
+        checkoutMode = CheckoutMode.ON_AGENT
+        cleanCheckout = true
     }
     steps {
         qodana {

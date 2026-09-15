@@ -40,8 +40,8 @@ Every record carries:
 - an explicit decision outcome, machine-readable reason code, and message;
 - input and output URIs, SHA-256 values, byte sizes, S3 version IDs, ETags,
   and optional Pachyderm commit IDs;
-- repository commit, exact DAG-file SHA-256, configured image, and registry
-  digest when available.
+- repository commit, exact DAG-file and complete DAG-bundle SHA-256 values,
+  configured image, and container digest when available.
 
 `reports/<object-id>/*.json` files are mutable operational summaries retained
 for compatibility. They are not the provenance source of truth.
@@ -96,18 +96,32 @@ BABELAPHA_TRANSCODE_IMAGE=registry.example/transcode@sha256:<64 hex>
 BABELAPHA_DIAGNOSTIC_IMAGE=registry.example/python@sha256:<64 hex>
 ```
 
-For local Airflow, inject the result of `docker image inspect` as
-`BABELAPHA_RUNTIME_IMAGE_DIGEST` when exact container reproduction is required.
-That digest applies only to tasks executing inside the Airflow container. A
-Kubernetes pod task never inherits it: the pod image must contain its own
-`@sha256:` digest. Otherwise it remains honestly marked
+For local Airflow, use the verified PowerShell launcher from a clean DAG
+checkout:
+
+```powershell
+.\scripts\Start-TransparentLocalStack.ps1
+```
+
+It binds the full Git commit to SHA-256 values for every Python file in the DAG
+bundle, builds the local images, injects the actual Airflow image ID, recreates
+the stack, and verifies the running containers and provenance API revision. A
+plain `BABELAPHA_GIT_SHA` environment value is only an assertion and can never
+upgrade unmatched code to an exact Git identity. If the bundle changes or a
+deployment is interrupted, new manifests keep the exact file and bundle hashes
+but set the Git commit to `null` with an explicit unverified identity status.
+
+The runtime image digest applies only to tasks executing inside the Airflow
+container. A Kubernetes pod task never inherits it: the pod image must contain
+its own `@sha256:` digest. Otherwise it remains honestly marked
 `CONFIGURED_REF_ONLY`; the production preflight then prevents it from running.
-Set `BABELAPHA_GIT_SHA` to the full 40- or 64-character commit SHA. Short or
-symbolic refs are not accepted as exact identities. The DAG-file SHA-256 remains
-exact even in an uncommitted local working tree. The production DAG sync also
-writes the validated CI commit to `.babelapha-git-sha` beside the deployed DAGs,
-so a copied DAG retains its exact Git identity even when the Airflow pod does
-not contain the repository metadata.
+
+Production GitSync builds `.babelapha-code-identity.json` from the clean CI
+checkout and publishes it only after all DAG files arrive. The callback accepts
+that Git commit only while the complete deployed bundle matches the attested
+file map. `.babelapha-git-sha` is still written last for compatibility with
+older deployed callback code, but current code never treats that unbound string
+as proof.
 
 ## Production runtime wiring
 
@@ -127,7 +141,8 @@ non-secret values in the Airflow deployment configuration:
 | `OPENLINEAGE_NAMESPACE` | Stable environment name such as `babelapha-production` |
 | `BABELAPHA_*_IMAGE` | Registry references pinned with `@sha256:` |
 
-The sync job refuses a missing, short, or symbolic `BUILD_VCS_NUMBER`.
+The sync job refuses a missing, short, symbolic, checkout-mismatched, or dirty
+`BUILD_VCS_NUMBER`/DAG bundle.
 Kubernetes DAGs refuse container references without a digest before launching
 a pod. The local DAG can still run without a known runtime digest, but its
 manifests are explicitly marked `CONFIGURED_REF_ONLY` rather than exact.
@@ -139,9 +154,9 @@ the same Airflow run instead of creating duplicate lineage.
 
 ## OpenLineage and Marquez
 
-The same manifest identity, run/stage/attempt/status/timing, decision, Git and
-DAG identity, container identity, orchestration details, and artifact evidence
-are emitted to OpenLineage. Every input and output dataset carries its SHA-256,
+The same manifest identity, run/stage/attempt/status/timing, decision, Git,
+DAG-file and DAG-bundle identity, container identity, orchestration details,
+and artifact evidence are emitted to OpenLineage. Every input and output dataset carries its SHA-256,
 byte size, media type, integrity state, Pachyderm commit, S3 version, and ETag in
 the versioned `babelapha_artifact` input/output facet. Placing this evidence in
 `inputFacets` and `outputFacets` preserves it on the dataset version associated
