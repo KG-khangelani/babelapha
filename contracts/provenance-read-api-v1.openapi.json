@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.2.0",
-    "description": "Read-only discovery and validated views over canonical provenance manifests, verified run identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.3.0",
+    "description": "Read-only discovery and validated views over canonical provenance manifests, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -121,6 +121,7 @@
           },
           "400": {"$ref": "#/components/responses/InvalidRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/EvidenceIntegrityFailed"},
           "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
         }
       }
@@ -145,6 +146,12 @@
         "content": {
           "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
         }
+      },
+      "EvidenceIntegrityFailed": {
+        "description": "Stored canonical evidence is contradictory or violates its immutable contract.",
+        "content": {
+          "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
+        }
       }
     },
     "schemas": {
@@ -153,7 +160,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.2.0"},
+          "api_version": {"const": "1.3.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -163,7 +170,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.2.0"},
+          "api_version": {"const": "1.3.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -180,7 +187,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.2.0"},
+          "api_version": {"const": "1.3.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -212,7 +219,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.2.0"},
+          "api_version": {"const": "1.3.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
         }
       },
@@ -235,7 +242,7 @@
       "RunView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["run_id", "dag_id", "statuses_observed", "first_recorded_at", "last_recorded_at", "run_identity", "task_coverage", "stage_evidence", "records"],
+        "required": ["run_id", "dag_id", "statuses_observed", "first_recorded_at", "last_recorded_at", "run_identity", "task_coverage", "stage_evidence", "artifact_evidence", "records"],
         "properties": {
           "run_id": {"type": "string", "minLength": 1},
           "dag_id": {"type": "string", "minLength": 1},
@@ -254,6 +261,10 @@
             "minItems": 1,
             "items": {"$ref": "#/components/schemas/StageEvidence"}
           },
+          "artifact_evidence": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ArtifactEvidence"}
+          },
           "records": {
             "type": "array",
             "minItems": 1,
@@ -266,9 +277,17 @@
       "RunIdentity": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["consistency", "object_filename", "pachyderm_commit", "git", "code", "orchestrator"],
+        "required": ["consistency", "completeness", "missing_fields", "object_filename", "pachyderm_commit", "git", "code", "orchestrator"],
         "properties": {
           "consistency": {"const": "VERIFIED"},
+          "completeness": {"enum": ["COMPLETE", "PARTIAL"]},
+          "missing_fields": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": ["object_filename", "pachyderm_commit", "git.repository", "git.commit", "git.identity_status", "code.path", "code.sha256", "code.bundle_sha256", "orchestrator.name", "orchestrator.version"]
+            }
+          },
           "object_filename": {"type": "string", "minLength": 1},
           "pachyderm_commit": {"type": ["string", "null"]},
           "git": {"$ref": "#/components/schemas/RunGitIdentity"},
@@ -305,6 +324,56 @@
         "properties": {
           "name": {"type": "string", "minLength": 1},
           "version": {"type": ["string", "null"]}
+        }
+      },
+      "ArtifactEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "kind", "sha256", "size_bytes", "integrity", "media_types_observed", "version", "observation_count", "first_observed_at", "last_observed_at", "occurrences"],
+        "properties": {
+          "uri": {"type": "string", "format": "uri"},
+          "kind": {"enum": ["OBJECT", "PREFIX"]},
+          "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+          "integrity": {"enum": ["VERIFIED", "UNVERIFIED"]},
+          "media_types_observed": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "version": {"$ref": "#/components/schemas/ArtifactVersionIdentity"},
+          "observation_count": {"type": "integer", "minimum": 1},
+          "first_observed_at": {"type": "string", "format": "date-time"},
+          "last_observed_at": {"type": "string", "format": "date-time"},
+          "occurrences": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/ArtifactOccurrence"}
+          }
+        }
+      },
+      "ArtifactVersionIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pachyderm_commit", "s3_version_id", "etag"],
+        "properties": {
+          "pachyderm_commit": {"type": ["string", "null"]},
+          "s3_version_id": {"type": ["string", "null"]},
+          "etag": {"type": ["string", "null"]}
+        }
+      },
+      "ArtifactOccurrence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifest_id", "task_id", "stage", "attempt", "status", "direction", "recorded_at"],
+        "properties": {
+          "manifest_id": {"type": "string", "format": "uuid"},
+          "task_id": {"type": "string", "minLength": 1},
+          "stage": {"type": "string", "minLength": 1},
+          "attempt": {"type": "integer", "minimum": 1},
+          "status": {"enum": ["SUCCEEDED", "FAILED", "RETRYING", "SKIPPED"]},
+          "direction": {"enum": ["INPUT", "OUTPUT"]},
+          "recorded_at": {"type": "string", "format": "date-time"}
         }
       },
       "StageEvidence": {

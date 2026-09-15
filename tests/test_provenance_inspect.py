@@ -168,6 +168,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "pachyderm_commit=pachyderm-commit-42",
             "Stage evidence:",
             "position=5 task=transcode membership=EXPECTED evidence=RECORDED attempts=1:FAILED:TASK_FAILED",
+            "Artifact evidence: 1",
+            "occurrences=validate_media:1:INPUT, validate_media:1:OUTPUT, transcode:1:INPUT",
             "No immutable execution record: validate_inputs, inspect_source, virus_scan, verify_outputs, mark_complete, verify_provenance",
             "[FAILED] stage=transcode task=transcode attempt=1",
             "decision=TASK_FAILED",
@@ -227,6 +229,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
             run["run_identity"],
             {
                 "consistency": "VERIFIED",
+                "completeness": "COMPLETE",
+                "missing_fields": [],
                 "object_filename": "interview.mp4",
                 "pachyderm_commit": "pachyderm-commit-42",
                 "git": {
@@ -256,6 +260,17 @@ class ProvenanceInspectorTests(unittest.TestCase):
         )
         self.assertEqual(stages[2]["evidence_state"], "NO_IMMUTABLE_RECORD")
         self.assertEqual(stages[2]["attempts"], [])
+        artifacts = run["artifact_evidence"]
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0]["uri"], records[0]["inputs"][0]["uri"])
+        self.assertEqual(artifacts[0]["sha256"], "a" * 64)
+        self.assertEqual(artifacts[0]["size_bytes"], 42)
+        self.assertEqual(artifacts[0]["integrity"], "VERIFIED")
+        self.assertEqual(artifacts[0]["observation_count"], 4)
+        self.assertEqual(
+            [occurrence["direction"] for occurrence in artifacts[0]["occurrences"]],
+            ["INPUT", "OUTPUT", "INPUT", "INPUT"],
+        )
 
     def test_complete_task_coverage_includes_the_final_gate(self):
         records = [
@@ -388,6 +403,83 @@ class ProvenanceInspectorTests(unittest.TestCase):
             item["version"]["pachyderm_commit"] = "pach-2"
         with self.assertRaisesRegex(ValueError, "conflicting Pachyderm commits"):
             inspector.build_view("interview-042", [first, second])
+
+    def test_run_identity_marks_unknown_to_known_legacy_evidence_as_partial(self):
+        complete = sample_record(task_id="validate_inputs")
+        incomplete = copy.deepcopy(
+            sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")
+        )
+        incomplete["inputs"] = []
+        incomplete["outputs"] = []
+        incomplete["execution"]["git"]["commit"] = None
+        incomplete["execution"]["code"]["sha256"] = None
+        incomplete["execution"]["parameters"] = {}
+
+        identity = inspector.build_view("interview-042", [complete, incomplete])["runs"][0][
+            "run_identity"
+        ]
+
+        self.assertEqual(identity["consistency"], "VERIFIED")
+        self.assertEqual(identity["completeness"], "PARTIAL")
+        self.assertEqual(
+            identity["missing_fields"],
+            [
+                "pachyderm_commit",
+                "git.commit",
+                "git.identity_status",
+                "code.sha256",
+                "code.bundle_sha256",
+            ],
+        )
+        self.assertEqual(identity["pachyderm_commit"], "pachyderm-commit-42")
+        self.assertEqual(identity["git"]["commit"], "b" * 40)
+        self.assertEqual(identity["code"]["sha256"], "c" * 64)
+
+    def test_artifact_ledger_rejects_competing_identities_for_one_uri(self):
+        mutations = (
+            ("kinds", ("kind",), "PREFIX"),
+            ("SHA-256 values", ("sha256",), "f" * 64),
+            ("sizes", ("size_bytes",), 99),
+            ("s3_version_id values", ("version", "s3_version_id"), "version-99"),
+            ("etag values", ("version", "etag"), "etag-99"),
+        )
+
+        for label, path, value in mutations:
+            with self.subTest(label=label):
+                first = sample_record(task_id="validate_inputs")
+                second = copy.deepcopy(
+                    sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")
+                )
+                for item in [*second["inputs"], *second["outputs"]]:
+                    target = item
+                    for segment in path[:-1]:
+                        target = target[segment]
+                    target[path[-1]] = value
+
+                with self.assertRaisesRegex(ValueError, f"conflicting {label}"):
+                    inspector.build_view("interview-042", [first, second])
+
+    def test_artifact_ledger_enriches_unknown_identity_without_inventing_conflict(self):
+        unverified = copy.deepcopy(sample_record(task_id="validate_inputs"))
+        for item in [*unverified["inputs"], *unverified["outputs"]]:
+            item["sha256"] = None
+            item["size_bytes"] = None
+            item["media_type"] = None
+            item["integrity"] = "UNVERIFIED"
+            item["version"]["s3_version_id"] = None
+            item["version"]["etag"] = None
+        verified = sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")
+
+        artifact = inspector.build_view("interview-042", [unverified, verified])["runs"][0][
+            "artifact_evidence"
+        ][0]
+
+        self.assertEqual(artifact["integrity"], "VERIFIED")
+        self.assertEqual(artifact["sha256"], "a" * 64)
+        self.assertEqual(artifact["size_bytes"], 42)
+        self.assertEqual(artifact["media_types_observed"], ["video/mp4"])
+        self.assertEqual(artifact["version"]["s3_version_id"], "version-42")
+        self.assertEqual(artifact["version"]["etag"], "etag-42")
 
     def test_embedded_contract_preserves_historical_topology_after_registry_drift(self):
         historical_contract = {

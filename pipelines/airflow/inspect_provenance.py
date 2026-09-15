@@ -331,13 +331,20 @@ def _stage_evidence(
     return ledger
 
 
-def _consistent_run_value(run_id: str, label: str, values: Iterable[object]) -> object:
-    """Return one invariant value or reject a run assembled from contradictory evidence."""
-    unique = set(values)
-    if len(unique) != 1:
-        rendered = ", ".join(sorted(repr(value) for value in unique))
+def _consistent_run_value(
+    run_id: str,
+    label: str,
+    values: Iterable[object],
+) -> tuple[object, bool]:
+    """Merge unknown-to-known evidence, rejecting two competing known values."""
+    observed = list(values)
+    known = {value for value in observed if value is not None}
+    if len(known) > 1:
+        rendered = ", ".join(sorted(repr(value) for value in known))
         raise ValueError(f"Run {run_id!r} contains conflicting {label}: {rendered}")
-    return next(iter(unique))
+    value = next(iter(known), None)
+    complete = value is not None and all(observed_value == value for observed_value in observed)
+    return value, complete
 
 
 def _record_pachyderm_commit(record: dict) -> str | None:
@@ -361,33 +368,62 @@ def _record_pachyderm_commit(record: dict) -> str | None:
 
 def _run_identity(run_id: str, records: list[dict]) -> dict:
     """Verify and expose facts that must be identical for every attempt in one run."""
-    def fact(label: str, getter) -> object:
-        return _consistent_run_value(run_id, label, (getter(record) for record in records))
+    missing_fields = []
 
-    return {
+    def fact(path: str, label: str, getter, *, unknown_strings: tuple[str, ...] = ()) -> object:
+        value, complete = _consistent_run_value(
+            run_id,
+            label,
+            (getter(record) for record in records),
+        )
+        if not complete or (isinstance(value, str) and value in unknown_strings):
+            missing_fields.append(path)
+        return value
+
+    identity = {
         "consistency": "VERIFIED",
-        "object_filename": fact("object filenames", lambda record: record["object"]["filename"]),
+        "object_filename": fact(
+            "object_filename",
+            "object filenames",
+            lambda record: record["object"]["filename"],
+            unknown_strings=("", "unknown"),
+        ),
         "pachyderm_commit": fact(
+            "pachyderm_commit",
             "Pachyderm commits",
             _record_pachyderm_commit,
         ),
         "git": {
             "repository": fact(
-                "Git repositories", lambda record: record["execution"]["git"]["repository"]
+                "git.repository",
+                "Git repositories",
+                lambda record: record["execution"]["git"]["repository"],
             ),
-            "commit": fact("Git commits", lambda record: record["execution"]["git"]["commit"]),
+            "commit": fact(
+                "git.commit",
+                "Git commits",
+                lambda record: record["execution"]["git"]["commit"],
+            ),
             "identity_status": fact(
+                "git.identity_status",
                 "Git identity statuses",
                 lambda record: record["execution"]["parameters"].get("git_identity_status"),
             ),
         },
         "code": {
-            "path": fact("DAG code paths", lambda record: record["execution"]["code"]["path"]),
+            "path": fact(
+                "code.path",
+                "DAG code paths",
+                lambda record: record["execution"]["code"]["path"],
+                unknown_strings=("", "unknown"),
+            ),
             "sha256": fact(
+                "code.sha256",
                 "DAG code SHA-256 values",
                 lambda record: record["execution"]["code"]["sha256"],
             ),
             "bundle_sha256": fact(
+                "code.bundle_sha256",
                 "DAG bundle SHA-256 values",
                 lambda record: record["execution"]["parameters"].get(
                     "dag_code_bundle_sha256"
@@ -396,13 +432,97 @@ def _run_identity(run_id: str, records: list[dict]) -> dict:
         },
         "orchestrator": {
             "name": fact(
-                "orchestrator names", lambda record: record["orchestrator"]["name"]
+                "orchestrator.name",
+                "orchestrator names",
+                lambda record: record["orchestrator"]["name"],
             ),
             "version": fact(
-                "orchestrator versions", lambda record: record["orchestrator"]["version"]
+                "orchestrator.version",
+                "orchestrator versions",
+                lambda record: record["orchestrator"]["version"],
             ),
         },
     }
+    identity["completeness"] = "COMPLETE" if not missing_fields else "PARTIAL"
+    identity["missing_fields"] = missing_fields
+    return identity
+
+
+def _artifact_identity_value(
+    run_id: str,
+    uri: str,
+    label: str,
+    values: Iterable[object],
+) -> object:
+    """Allow identity enrichment from null to known, but reject competing known values."""
+    known = {value for value in values if value is not None}
+    if len(known) > 1:
+        rendered = ", ".join(sorted(repr(value) for value in known))
+        raise ValueError(
+            f"Run {run_id!r} contains conflicting {label} for artifact {uri!r}: {rendered}"
+        )
+    return next(iter(known), None)
+
+
+def _artifact_evidence(run_id: str, records: list[dict]) -> list[dict]:
+    """Create first-class artifact nodes and verify every repeated URI identity."""
+    observations: dict[str, dict[str, list]] = {}
+    for record in records:
+        run = record["run"]
+        for direction, artifacts in (("INPUT", record["inputs"]), ("OUTPUT", record["outputs"])):
+            for item in artifacts:
+                observed = observations.setdefault(item["uri"], {"items": [], "occurrences": []})
+                observed["items"].append(item)
+                observed["occurrences"].append(
+                    {
+                        "manifest_id": record["manifest_id"],
+                        "task_id": run["task_id"],
+                        "stage": run["stage"],
+                        "attempt": run["attempt"],
+                        "status": run["status"],
+                        "direction": direction,
+                        "recorded_at": record["recorded_at"],
+                    }
+                )
+
+    evidence = []
+    for uri, observed in observations.items():
+        items = observed["items"]
+        occurrences = observed["occurrences"]
+        kind = _artifact_identity_value(run_id, uri, "kinds", (item["kind"] for item in items))
+        sha256 = _artifact_identity_value(
+            run_id, uri, "SHA-256 values", (item["sha256"] for item in items)
+        )
+        size_bytes = _artifact_identity_value(
+            run_id, uri, "sizes", (item["size_bytes"] for item in items)
+        )
+        version = {
+            field: _artifact_identity_value(
+                run_id,
+                uri,
+                f"{field} values",
+                (item["version"][field] for item in items),
+            )
+            for field in ("pachyderm_commit", "s3_version_id", "etag")
+        }
+        evidence.append(
+            {
+                "uri": uri,
+                "kind": kind,
+                "sha256": sha256,
+                "size_bytes": size_bytes,
+                "integrity": "VERIFIED" if sha256 else "UNVERIFIED",
+                "media_types_observed": sorted(
+                    {item["media_type"] for item in items if item["media_type"] is not None}
+                ),
+                "version": version,
+                "observation_count": len(occurrences),
+                "first_observed_at": occurrences[0]["recorded_at"],
+                "last_observed_at": occurrences[-1]["recorded_at"],
+                "occurrences": occurrences,
+            }
+        )
+    return evidence
 
 
 def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict | None = None) -> dict:
@@ -509,6 +629,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                 record["run"]["attempt"],
             ),
         )
+        artifact_evidence = _artifact_evidence(run_id, ordered)
         runs.append(
             {
                 "run_id": run_id,
@@ -534,6 +655,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                     expected_task_ids,
                     delivery_by_manifest_id,
                 ),
+                "artifact_evidence": artifact_evidence,
                 "records": ordered,
             }
         )
@@ -606,7 +728,8 @@ def render_text(view: dict) -> str:
                 f"DAG: {run['dag_id']}",
                 f"Observed statuses: {', '.join(run['statuses_observed'])}",
                 f"Evidence window: {run['first_recorded_at']} -> {run['last_recorded_at']}",
-                f"Run identity: consistency={identity['consistency']}",
+                "Run identity: "
+                f"consistency={identity['consistency']} completeness={identity['completeness']}",
                 "  "
                 f"object_filename={identity['object_filename']} "
                 f"pachyderm_commit={_value(identity['pachyderm_commit'])}",
@@ -620,6 +743,8 @@ def render_text(view: dict) -> str:
                 "  "
                 f"orchestrator={identity['orchestrator']['name']}@"
                 f"{_value(identity['orchestrator']['version'])}",
+                "  missing_fields="
+                + (", ".join(identity["missing_fields"]) or "(none)"),
                 f"Task coverage: {len(coverage['recorded_task_ids'])}/{coverage_denominator} recorded",
                 "Task contract: "
                 f"source={coverage['contract_source']} "
@@ -640,6 +765,30 @@ def render_text(view: dict) -> str:
                 f"position={position} task={stage['task_id']} "
                 f"membership={stage['contract_membership']} "
                 f"evidence={stage['evidence_state']} attempts={attempts}"
+            )
+        lines.append(f"Artifact evidence: {len(run['artifact_evidence'])}")
+        for item in run["artifact_evidence"]:
+            version = item["version"]
+            media_types = ",".join(item["media_types_observed"]) or "-"
+            occurrences = ", ".join(
+                f"{occurrence['task_id']}:{occurrence['attempt']}:{occurrence['direction']}"
+                for occurrence in item["occurrences"]
+            )
+            lines.extend(
+                [
+                    f"  [{item['integrity']}] {item['uri']}",
+                    "    "
+                    f"kind={item['kind']} sha256={_value(item['sha256'])} "
+                    f"bytes={_value(item['size_bytes'])} media_types={media_types}",
+                    "    "
+                    f"pachyderm_commit={_value(version['pachyderm_commit'])} "
+                    f"s3_version={_value(version['s3_version_id'])} "
+                    f"etag={_value(version['etag'])}",
+                    "    "
+                    f"observations={item['observation_count']} "
+                    f"window={item['first_observed_at']} -> {item['last_observed_at']}",
+                    f"    occurrences={occurrences}",
+                ]
             )
         if coverage["not_recorded_task_ids"]:
             lines.append(

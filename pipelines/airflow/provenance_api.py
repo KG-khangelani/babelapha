@@ -18,7 +18,7 @@ from inspect_provenance import (
 )
 
 
-API_VERSION = "1.2.0"
+API_VERSION = "1.3.0"
 API_PORT = int(os.environ.get("PROVENANCE_API_PORT", "8010"))
 PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
     "S3_BUCKET", "pachyderm"
@@ -161,24 +161,31 @@ def route_get(target: str) -> tuple[int, dict]:
         run_id = query.get("run_id", [None])[0]
         if run_id == "":
             raise APIError(400, "INVALID_RUN_ID", "Run ID cannot be empty")
-        records = read_records(
-            object_id=object_id,
-            run_id=run_id,
-            endpoint_url=PROVENANCE_ENDPOINT,
-            bucket=PROVENANCE_BUCKET,
-        )
+        try:
+            records = read_records(
+                object_id=object_id,
+                run_id=run_id,
+                endpoint_url=PROVENANCE_ENDPOINT,
+                bucket=PROVENANCE_BUCKET,
+            )
+        except ValueError as exc:
+            raise APIError(409, "EVIDENCE_INTEGRITY_FAILED", str(exc)) from exc
         if not records:
             raise APIError(404, "EVIDENCE_NOT_FOUND", "No canonical provenance evidence found")
-        delivery = read_openlineage_delivery_evidence(
-            object_id=object_id,
-            records=records,
-            run_id=run_id,
-            endpoint_url=PROVENANCE_ENDPOINT,
-            bucket=PROVENANCE_BUCKET,
-        )
+        try:
+            delivery = read_openlineage_delivery_evidence(
+                object_id=object_id,
+                records=records,
+                run_id=run_id,
+                endpoint_url=PROVENANCE_ENDPOINT,
+                bucket=PROVENANCE_BUCKET,
+            )
+            view = build_view(object_id, records, delivery)
+        except ValueError as exc:
+            raise APIError(409, "EVIDENCE_INTEGRITY_FAILED", str(exc)) from exc
         return 200, {
             "api_version": API_VERSION,
-            "data": build_view(object_id, records, delivery),
+            "data": view,
         }
 
     raise APIError(404, "NOT_FOUND", "Resource not found")

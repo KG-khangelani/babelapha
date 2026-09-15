@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.2.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.3.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -277,6 +277,23 @@ entire read as an evidence-integrity error. The common facts are exposed as a
 first-class `run_identity` with `consistency: VERIFIED`; container identity
 remains on each stage because different processing stages intentionally use
 different images.
+
+Missing legacy identity observations are not treated as competing facts. The
+reader retains the known value, sets `completeness: PARTIAL`, and lists each
+gap in `missing_fields`. Two different known values still invalidate the run.
+
+The reader also groups every input and output occurrence into first-class
+`artifact_evidence` nodes keyed by URI. Null identity fields may be enriched by
+a later verified observation, but two known SHA-256 values, byte sizes, object
+kinds, Pachyderm commits, S3 versions, or ETags for the same URI invalidate the
+run. Each node retains the task, attempt, direction, status, manifest, and time
+of every observation, giving the explorer explicit artifact lineage instead of
+requiring it to infer hidden edges.
+
+The HTTP boundary reports invalid or contradictory stored evidence as `409
+EVIDENCE_INTEGRITY_FAILED`, distinct from infrastructure failures (`500`) and
+missing objects (`404`). This lets the future explorer show an integrity
+failure as evidence instead of presenting it as an application outage.
 
 The inspector exits with code `3` for missing or inconsistent delivery
 evidence. Add `--require-delivered` in CI or an operational check to also return

@@ -51,6 +51,10 @@ class ProvenanceAPITests(unittest.TestCase):
         ]["items"]["$ref"]
         self.assertIn("089e23c53303b0c4b5298b12fdda11f646e3ff2b", manifest_ref)
         self.assertNotIn("/main/", manifest_ref)
+        self.assertIn(
+            "409",
+            contract["paths"]["/api/v1/media/{object_id}"]["get"]["responses"],
+        )
 
         status, served = api.route_get("/api/v1/openapi.json")
         self.assertEqual(status, 200)
@@ -117,7 +121,7 @@ class ProvenanceAPITests(unittest.TestCase):
         status, payload = api.route_get("/health")
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["api_version"], "1.2.0")
+        self.assertEqual(payload["api_version"], "1.3.0")
         self.assertEqual(payload["status"], "ok")
 
     def test_catalog_is_paginated_and_adds_canonical_detail_links(self):
@@ -163,7 +167,7 @@ class ProvenanceAPITests(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"api_version": "1.2.0", "data": view})
+        self.assertEqual(payload, {"api_version": "1.3.0", "data": view})
         read.assert_called_once_with(
             object_id="interview/002",
             run_id="manual__run 42",
@@ -200,6 +204,19 @@ class ProvenanceAPITests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 404)
         self.assertEqual(raised.exception.code, "EVIDENCE_NOT_FOUND")
+
+    def test_invalid_stored_evidence_is_a_visible_integrity_conflict(self):
+        with mock.patch.object(
+            api,
+            "read_records",
+            side_effect=ValueError("conflicting SHA-256 values"),
+        ):
+            with self.assertRaises(api.APIError) as raised:
+                api.route_get("/api/v1/media/tampered")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "EVIDENCE_INTEGRITY_FAILED")
+        self.assertIn("conflicting SHA-256 values", str(raised.exception))
 
     def test_http_boundary_is_get_only_and_cors_is_allowlisted(self):
         server = api.ThreadingHTTPServer(("127.0.0.1", 0), api.ProvenanceAPIHandler)

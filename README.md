@@ -161,7 +161,9 @@ s3://pachyderm/output/<id>/dash/*
    stages that have no immutable record, while the accompanying manifests retain
    the exact artifact, Git, DAG-bundle, and container identities. A verified
    `run_identity` is returned only when every stage agrees on the common
-   filename, Pachyderm, Git, DAG, and orchestrator facts.
+   filename, Pachyderm, Git, DAG, and orchestrator facts. First-class
+   `artifact_evidence` nodes group every input/output occurrence by URI and
+   reject competing hashes or storage versions.
 
 Alternative event-driven path (closer to production):
 
