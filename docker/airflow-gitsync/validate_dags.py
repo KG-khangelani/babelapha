@@ -5,6 +5,7 @@ This catches both Python syntax errors and import/parse errors that prevent
 Airflow from displaying DAGs in the UI.
 """
 import os
+import subprocess
 import sys
 import py_compile
 from pathlib import Path
@@ -27,13 +28,16 @@ def compile_only(folder: Path) -> list[tuple[str, str]]:
 
 def airflow_parse(folder: Path) -> tuple[int, dict[str, str]]:
     """Use Airflow DagBag to parse DAGs; returns (dag_count, import_errors)."""
+    # Airflow adds its configured dags folder to PYTHONPATH at runtime. Mirror
+    # that behavior when DagBag is invoked directly by this standalone checker.
+    sys.path.insert(0, str(folder))
     try:
-        from airflow.models.dagbag import DagBag
+        from airflow.dag_processing.dagbag import DagBag
     except Exception as e:  # pragma: no cover - defensive
         print(f"✗ Airflow not available in validation image: {e}")
         return (0, {"airflow": str(e)})
 
-    bag = DagBag(dag_folder=str(folder), include_examples=False, safe_mode=False)
+    bag = DagBag(dag_folder=str(folder), safe_mode=False)
     dag_count = len(bag.dags)
     import_errors = {k: str(v) for k, v in bag.import_errors.items()}
 
@@ -75,7 +79,17 @@ def main():
         print("\n✗ No DAGs discovered by Airflow.")
         sys.exit(1)
 
-    print("\n✓ All DAGs validated successfully")
+    print("\nRunning repository contract tests...")
+    tests = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", str(Path(workspace_dir) / "tests"), "-v"],
+        cwd=workspace_dir,
+        check=False,
+    )
+    if tests.returncode != 0:
+        print("\n✗ Provenance contract tests failed.")
+        sys.exit(tests.returncode)
+
+    print("\n✓ All DAGs and provenance contracts validated successfully")
 
 
 if __name__ == "__main__":

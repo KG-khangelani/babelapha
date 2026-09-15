@@ -12,7 +12,18 @@ from airflow.sdk import dag, task, get_current_context
 import os
 from datetime import datetime
 
-default_args = dict(retries=1)
+from provenance import (
+    provenance_failure_callback,
+    provenance_retry_callback,
+    provenance_success_callback,
+)
+
+default_args = {
+    "retries": 1,
+    "on_success_callback": provenance_success_callback,
+    "on_failure_callback": provenance_failure_callback,
+    "on_retry_callback": provenance_retry_callback,
+}
 
 @dag(
     dag_id="ingest_pipeline_v2",
@@ -31,7 +42,7 @@ def ingest_pipeline_v2():
     from airflow.providers.cncf.kubernetes.secret import Secret
     from kubernetes.client import models as k8s
     
-    @task
+    @task(retries=0)
     def validate_inputs():
         """Validate that required parameters are present."""
         context = get_current_context()

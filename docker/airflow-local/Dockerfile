@@ -19,4 +19,5 @@ USER airflow
 
 RUN pip install --no-cache-dir \
     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.11.txt" \
-    "apache-airflow-providers-cncf-kubernetes==10.21.0"
+    "apache-airflow-providers-cncf-kubernetes==10.21.0" \
+    "apache-airflow-providers-amazon==9.34.0"

@@ -26,6 +26,17 @@ x-airflow-env: &airflow_env
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-pachyderm-secret-key-123456789}
   AWS_DEFAULT_REGION: us-east-1
   S3_BUCKET: ${AIRFLOW_S3_BUCKET:-pachyderm}
+  PROVENANCE_S3_BUCKET: ${AIRFLOW_S3_BUCKET:-pachyderm}
+  PROVENANCE_S3_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  OPENLINEAGE_URL: http://marquez:5000
+  OPENLINEAGE_ENDPOINT: /api/v1/lineage
+  OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-babelapha.local}
+  BABELAPHA_GIT_SHA: ${BABELAPHA_GIT_SHA:-}
+  BABELAPHA_RUNTIME_IMAGE: ${BABELAPHA_RUNTIME_IMAGE:-babelapha-airflow-local}
+  BABELAPHA_RUNTIME_IMAGE_DIGEST: ${BABELAPHA_RUNTIME_IMAGE_DIGEST:-}
+  BABELAPHA_SCAN_IMAGE: ${BABELAPHA_SCAN_IMAGE:-localhost/clamav:latest}
+  BABELAPHA_VALIDATE_IMAGE: ${BABELAPHA_VALIDATE_IMAGE:-localhost/validate:latest}
+  BABELAPHA_TRANSCODE_IMAGE: ${BABELAPHA_TRANSCODE_IMAGE:-localhost/transcode:latest}
   AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
   AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin123}
   AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME:-Local}
@@ -81,6 +92,7 @@ services:
       - |
         mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-pachyderm} ${MINIO_ROOT_PASSWORD:-pachyderm-secret-key-123456789}
         mc mb -p local/pachyderm
+        mc version enable local/pachyderm
         mc anonymous set download local/pachyderm
     restart: "no"
 
@@ -132,6 +144,8 @@ services:
         condition: service_completed_successfully
       minio:
         condition: service_healthy
+      marquez:
+        condition: service_healthy
     environment:
       <<: *airflow_env
     volumes:
@@ -159,6 +173,8 @@ services:
         condition: service_completed_successfully
       minio:
         condition: service_healthy
+      marquez:
+        condition: service_healthy
     environment:
       <<: *airflow_env
     volumes:
@@ -174,6 +190,8 @@ services:
         condition: service_completed_successfully
       minio:
         condition: service_healthy
+      marquez:
+        condition: service_healthy
     environment:
       <<: *airflow_env
     volumes:
@@ -181,7 +199,62 @@ services:
       - ./pipelines/airflow/dags:/opt/airflow/dags
     command: airflow dag-processor
 
+  marquez-db:
+    image: postgres:14.20
+    container_name: babelapha-marquez-db
+    environment:
+      POSTGRES_USER: ${MARQUEZ_DB_USER:-marquez}
+      POSTGRES_PASSWORD: ${MARQUEZ_DB_PASSWORD:-marquez}
+      POSTGRES_DB: ${MARQUEZ_DB_NAME:-marquez}
+    volumes:
+      - marquez-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MARQUEZ_DB_USER:-marquez} -d ${MARQUEZ_DB_NAME:-marquez}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  marquez:
+    image: marquezproject/marquez:0.51.1
+    container_name: babelapha-marquez
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${MARQUEZ_DB_NAME:-marquez}
+      POSTGRES_USER: ${MARQUEZ_DB_USER:-marquez}
+      POSTGRES_PASSWORD: ${MARQUEZ_DB_PASSWORD:-marquez}
+      SEARCH_ENABLED: "false"
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.51.1
+    container_name: babelapha-marquez-web
+    depends_on:
+      marquez:
+        condition: service_healthy
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: 5000
+      WEB_PORT: 3000
+      REACT_APP_ADVANCED_SEARCH: "false"
+    ports:
+      - "3001:3000"
+
 volumes:
   postgres-db:
   minio-data:
   airflow-home:
+  marquez-db:

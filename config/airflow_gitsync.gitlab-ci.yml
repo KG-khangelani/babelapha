@@ -8,7 +8,7 @@
 airflow_validate:
   stage: airflow
   image:
-    name: apache/airflow:3.1.0-python3.11
+    name: apache/airflow:3.3.1-python3.11
     entrypoint: [""]
   tags:
     - khancreate
@@ -19,6 +19,8 @@ airflow_validate:
       changes:
         - pipelines/airflow/dags/**/*
         - docker/airflow-gitsync/**/*
+        - contracts/**/*
+        - tests/**/*
         - config/*.yml
       when: on_success
     # Allow Web/API runs even with no diff (run automatically)
@@ -26,6 +28,12 @@ airflow_validate:
       when: on_success
       allow_failure: false
     - when: never
+  before_script:
+    - >-
+      python -m pip install --no-cache-dir
+      --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.11.txt
+      apache-airflow-providers-cncf-kubernetes==10.21.0
+      apache-airflow-providers-amazon==9.34.0
   script:
     - python docker/airflow-gitsync/validate_dags.py
 

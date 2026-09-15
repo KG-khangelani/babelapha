@@ -14,6 +14,7 @@ It starts simple:
 - **FastAPI** serves a clean backend for the data.
 - **React (Next.js)** provides the public website.
 - **TeamCity** automates builds and deployments.
+- **OpenLineage + Marquez** collect and display artifact-level provenance.
 
 As we grow, we’ll add things like **Milvus** for semantic search, **OpenTelemetry** for monitoring,  
 and an **interactive provenance explorer** so anyone can visually trace how each dataset was created.
@@ -87,6 +88,7 @@ The stack includes:
 - `pachyderm-webhook`: local webhook listener that triggers `ingest_pipeline_local` when a matching Pachyderm-style event payload is posted.
 - `airflow-webserver` + `airflow-scheduler`: local Airflow runtime.
 - `airflow-init`: one-time DB + admin user bootstrap.
+- `marquez` + `marquez-web`: OpenLineage ingestion and lineage graph UI.
 
 To run the pipeline:
 
@@ -123,6 +125,10 @@ docker compose logs -f airflow-scheduler
 s3://pachyderm/output/<id>/hls/*
 s3://pachyderm/output/<id>/dash/*
 ```
+
+5. Confirm immutable provenance records under
+   `s3://pachyderm/provenance/<id>/<run-id>/` and inspect the lineage graph at
+   <http://localhost:3001>.
 
 Alternative event-driven path (closer to production):
 
@@ -171,13 +177,15 @@ This project aims to:
 ## Pipeline Improvement Opportunities
 
 1. Replace duplicated pipeline implementations (`ingest_pipeline.py`, `ingest_pipeline_v2.py`, `ingest_pipeline_local.py`) with one source of truth plus execution mode toggles.
-2. Wire local mode to a true file-availability contract (manifest/checksum tracking) before stage transitions.
-3. Move hardcoded MinIO defaults into a single config source and fail fast when env vars are missing.
-4. Add structured report output to the MinIO prefix for each stage (`/reports/<id>/...`) and keep it consistent with Pachyderm-side scripts.
-5. Implement retry/backoff and dead-letter handling for failed transcoding/validation runs.
-6. Add alerting + metrics on stage latency and error counts (especially for transcoding and uploads).
-7. Harden webhook/API authentication for `ingest_pipeline` and lock down endpoint access.
-8. Add integration smoke tests for: local DAG trigger, invalid payload handling, empty/bad input files, and end-to-end output verification.
+2. Move hardcoded MinIO defaults into a single config source and fail fast when production secrets are missing.
+3. Implement dead-letter handling for failed transcoding/validation runs.
+4. Add alerting + metrics on stage latency and error counts (especially for transcoding and uploads).
+5. Harden webhook/API authentication for `ingest_pipeline` and lock down endpoint access.
+6. Add integration smoke tests for invalid payloads, empty/bad input files, retry history, and end-to-end output verification.
+
+The implemented provenance contract, failure semantics, OpenLineage mapping,
+and exact-identity configuration are documented in
+[`Documentation/pipeline-transparency.md`](Documentation/pipeline-transparency.md).
 
 ## Continuous Integration
 

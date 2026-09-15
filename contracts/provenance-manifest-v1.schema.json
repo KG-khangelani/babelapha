@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/provenance-manifest-v1.schema.json",
+  "title": "Babelapha provenance stage manifest",
+  "description": "Immutable evidence for one Airflow task attempt in a media-processing run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "manifest_id",
+    "recorded_at",
+    "object",
+    "run",
+    "decision",
+    "inputs",
+    "outputs",
+    "execution",
+    "orchestrator",
+    "links"
+  ],
+  "properties": {
+    "$schema": {"type": "string", "format": "uri"},
+    "schema_version": {"const": "1.0.0"},
+    "manifest_id": {"type": "string", "format": "uuid"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "filename"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "filename": {"type": "string", "minLength": 1}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "dag_id", "task_id", "stage", "attempt", "status", "started_at", "completed_at", "duration_ms"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "dag_id": {"type": "string", "minLength": 1},
+        "task_id": {"type": "string", "minLength": 1},
+        "stage": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["SUCCEEDED", "FAILED", "RETRYING", "SKIPPED"]},
+        "started_at": {"type": ["string", "null"], "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "reason_code", "message"],
+      "properties": {
+        "outcome": {"type": "string", "minLength": 1},
+        "reason_code": {"type": "string", "pattern": "^[A-Z0-9_]+$"},
+        "message": {"type": "string"}
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "outputs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git", "code", "container", "parameters"],
+      "properties": {
+        "git": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "commit"],
+          "properties": {
+            "repository": {"type": "string"},
+            "commit": {"type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"}
+          }
+        },
+        "code": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+          }
+        },
+        "container": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["image", "digest", "identity_status"],
+          "properties": {
+            "image": {"type": "string", "minLength": 1},
+            "digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+            "identity_status": {"enum": ["VERIFIED_DIGEST", "CONFIGURED_REF_ONLY"]}
+          }
+        },
+        "parameters": {"type": "object"}
+      }
+    },
+    "orchestrator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "airflow"},
+        "version": {"type": ["string", "null"]}
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest", "airflow_log"],
+      "properties": {
+        "manifest": {"type": "string", "format": "uri"},
+        "airflow_log": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "kind", "sha256", "size_bytes", "media_type", "integrity", "version"],
+      "properties": {
+        "uri": {"type": "string", "format": "uri"},
+        "kind": {"enum": ["OBJECT", "PREFIX"]},
+        "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "media_type": {"type": ["string", "null"]},
+        "integrity": {"enum": ["VERIFIED", "UNVERIFIED"]},
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pachyderm_commit", "s3_version_id", "etag"],
+          "properties": {
+            "pachyderm_commit": {"type": ["string", "null"]},
+            "s3_version_id": {"type": ["string", "null"]},
+            "etag": {"type": ["string", "null"]}
+          }
+        }
+      }
+    }
+  }
+}

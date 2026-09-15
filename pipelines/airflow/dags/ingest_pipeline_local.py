@@ -14,13 +14,28 @@ from pathlib import Path
 
 from airflow.sdk import dag, task, get_current_context
 
+from provenance import (
+    artifact_from_file,
+    assert_success_manifests,
+    provenance_failure_callback,
+    provenance_retry_callback,
+    provenance_success_callback,
+    s3_artifact_from_file,
+    upload_file_artifact,
+)
+
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "pachyderm")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "pachyderm-secret-key-123456789")
 S3_BUCKET = os.environ.get("S3_BUCKET", "pachyderm")
 
 WORK_DIR = Path("/tmp/babelapha")
-default_args = {"retries": 1}
+default_args = {
+    "retries": 1,
+    "on_success_callback": provenance_success_callback,
+    "on_failure_callback": provenance_failure_callback,
+    "on_retry_callback": provenance_retry_callback,
+}
 
 
 def run_cmd(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -85,7 +100,7 @@ def put_report(inputs: dict, stage: str, payload: dict) -> None:
 def ingest_pipeline_local():
     """Run the media ingestion pipeline locally against MinIO."""
 
-    @task
+    @task(retries=0)
     def validate_inputs() -> dict:
         context = get_current_context()
         dag_run = context.get("dag_run")
@@ -106,6 +121,12 @@ def ingest_pipeline_local():
             "work_dir": str(WORK_DIR / object_id),
             "minio_endpoint": MINIO_ENDPOINT,
             "ts": datetime.utcnow().isoformat() + "Z",
+            "provenance_stage": "request_validated",
+            "provenance_decision": {
+                "outcome": "accepted",
+                "reason_code": "INPUT_PARAMETERS_ACCEPTED",
+                "message": "The object identifier and filename are present.",
+            },
         }
 
     @task
@@ -131,6 +152,26 @@ def ingest_pipeline_local():
             raise FileNotFoundError(f"Downloaded input file not found: {local_path}")
 
         inputs["local_input_path"] = str(local_path)
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        pachyderm_commit = (getattr(dag_run, "conf", {}) or {}).get("pachyderm_commit")
+        remote_artifact = s3_artifact_from_file(
+            local_path,
+            bucket=inputs["s3_bucket"],
+            key=inputs["s3_input_key"],
+            endpoint_url=inputs["minio_endpoint"],
+            pachyderm_commit=pachyderm_commit,
+        )
+        local_artifact = artifact_from_file(local_path)
+        inputs["source_artifact"] = remote_artifact
+        inputs["provenance_stage"] = "uploaded"
+        inputs["provenance_inputs"] = [remote_artifact]
+        inputs["provenance_outputs"] = [local_artifact]
+        inputs["provenance_decision"] = {
+            "outcome": "available",
+            "reason_code": "SOURCE_DOWNLOADED_AND_HASHED",
+            "message": "The uploaded source was downloaded and its SHA-256 was verified.",
+        }
         return inputs
 
     @task
@@ -147,6 +188,15 @@ def ingest_pipeline_local():
         print(f"[virus_scan] Quick local placeholder scan for {local_path}")
         print(json.dumps(report, indent=2))
         put_report(inputs, "virus_scan", report)
+        source = inputs["source_artifact"]
+        inputs["provenance_stage"] = "virus_scan"
+        inputs["provenance_inputs"] = [source]
+        inputs["provenance_outputs"] = [source]
+        inputs["provenance_decision"] = {
+            "outcome": "clean",
+            "reason_code": "LOCAL_PLACEHOLDER_SCAN_CLEAN",
+            "message": "Local development placeholder reported the source as clean; this is not a production ClamAV verdict.",
+        }
         return inputs
 
     @task
@@ -175,6 +225,15 @@ def ingest_pipeline_local():
             },
         )
         inputs["media_valid"] = True
+        source = inputs["source_artifact"]
+        inputs["provenance_stage"] = "validated"
+        inputs["provenance_inputs"] = [source]
+        inputs["provenance_outputs"] = [source]
+        inputs["provenance_decision"] = {
+            "outcome": "valid",
+            "reason_code": "FFPROBE_ACCEPTED_MEDIA",
+            "message": "FFprobe parsed the media streams and format successfully.",
+        }
         return inputs
 
     @task
@@ -226,6 +285,7 @@ def ingest_pipeline_local():
 
         inputs["hls_files"] = sorted(str(p) for p in hls_dir.glob("*") if p.is_file())
         inputs["dash_files"] = sorted(str(p) for p in dash_dir.glob("*") if p.is_file())
+        output_artifacts = [artifact_from_file(path) for path in inputs["hls_files"] + inputs["dash_files"]]
         put_report(
             inputs,
             "transcode",
@@ -239,6 +299,14 @@ def ingest_pipeline_local():
                 "ts": datetime.utcnow().isoformat() + "Z",
             },
         )
+        inputs["provenance_stage"] = "transcoded"
+        inputs["provenance_inputs"] = [inputs["source_artifact"]]
+        inputs["provenance_outputs"] = output_artifacts
+        inputs["provenance_decision"] = {
+            "outcome": "created",
+            "reason_code": "HLS_AND_DASH_CREATED",
+            "message": "HLS and DASH renditions were created and hashed.",
+        }
         return inputs
 
     @task
@@ -248,23 +316,34 @@ def ingest_pipeline_local():
         if not output_files:
             raise RuntimeError("No output files found to upload")
 
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        pachyderm_commit = (getattr(dag_run, "conf", {}) or {}).get("pachyderm_commit")
+        stored_artifacts = []
         for local_file in output_files:
             local_file = Path(local_file)
             relative = local_file.relative_to(Path(inputs["work_dir"]) / "output")
             s3_key = f"{output_prefix}/{relative.as_posix()}"
-            run_cmd(
-                [
-                    "aws",
-                    "--endpoint-url",
-                    inputs["minio_endpoint"],
-                    "s3",
-                    "cp",
-                    str(local_file),
-                    s3_uri(s3_key),
-                ]
+            stored_artifacts.append(
+                upload_file_artifact(
+                    local_file,
+                    bucket=inputs["s3_bucket"],
+                    key=s3_key,
+                    endpoint_url=inputs["minio_endpoint"],
+                    pachyderm_commit=pachyderm_commit,
+                )
             )
 
         inputs["status"] = "success"
+        inputs["stored_artifacts"] = stored_artifacts
+        inputs["provenance_stage"] = "published"
+        inputs["provenance_inputs"] = [artifact_from_file(path) for path in output_files]
+        inputs["provenance_outputs"] = stored_artifacts
+        inputs["provenance_decision"] = {
+            "outcome": "published",
+            "reason_code": "OUTPUTS_STORED_WITH_SHA256",
+            "message": "All renditions were uploaded with SHA-256 metadata.",
+        }
         return inputs
 
     @task
@@ -275,9 +354,44 @@ def ingest_pipeline_local():
             "filename": inputs["filename"],
             "s3_output_key": inputs["s3_output_key"],
             "completed_at": datetime.utcnow().isoformat() + "Z",
+            "provenance_stage": "pipeline_complete",
+            "provenance_inputs": inputs.get("stored_artifacts", []),
+            "provenance_outputs": inputs.get("stored_artifacts", []),
+            "provenance_decision": {
+                "outcome": "complete",
+                "reason_code": "PIPELINE_COMPLETED",
+                "message": "All required ingestion stages completed successfully.",
+            },
         }
         print(json.dumps(result, indent=2))
         return result
+
+    @task
+    def verify_provenance(inputs: dict) -> dict:
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        locations = assert_success_manifests(
+            object_id=inputs["object_id"],
+            run_id=dag_run.run_id,
+            task_ids=[
+                "validate_inputs",
+                "download_from_minio",
+                "virus_scan",
+                "validate_media",
+                "transcode",
+                "upload_results",
+                "mark_complete",
+            ],
+            endpoint_url=MINIO_ENDPOINT,
+            bucket=S3_BUCKET,
+        )
+        inputs["provenance_stage"] = "provenance_verified"
+        inputs["provenance_decision"] = {
+            "outcome": "verified",
+            "reason_code": "PROVENANCE_RECORDS_COMPLETE",
+            "message": f"Verified {len(locations)} immutable provenance records.",
+        }
+        return inputs
 
     validated = validate_inputs()
     downloaded = download_from_minio(validated)
@@ -285,7 +399,8 @@ def ingest_pipeline_local():
     validated_media = validate_media(scanned)
     transcoded = transcode(validated_media)
     uploaded = upload_results(transcoded)
-    mark_complete(uploaded)
+    completed = mark_complete(uploaded)
+    verify_provenance(completed)
 
 
 ingest_pipeline_local()

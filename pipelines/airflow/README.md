@@ -1,9 +1,8 @@
 # Airflow Pipelines
 
-This directory contains Airflow DAGs that orchestrate the media ingestion and
-processing workflows. The current focus is a single `ingest_pipeline` DAG that
-models the high-level steps required to take a raw interview recording and
-produce a transcript with associated metadata.
+This directory contains Airflow DAGs that orchestrate media ingestion and emit
+immutable provenance evidence plus OpenLineage events. `ingest_pipeline` is the
+production Kubernetes flow; `ingest_pipeline_local` is the Docker Compose flow.
 
 ## Triggering Methods
 
@@ -81,25 +80,20 @@ pip install "apache-airflow[celery]==3.3.1" --constraint "https://raw.githubuser
 
 **ingest_pipeline** stages:
 
-1. **virus_scan** (ClamAV): Scans uploaded file for malware
-   - Input: `/incoming/<id>/<filename>`
-   - Output: `/clean/<id>/<filename>` (if clean) or `/quarantine/<id>/<filename>`
-   - Report: `/reports/<id>/clamav.json`
+1. **validate_inputs**: validates the event contract.
+2. **inspect_source**: streams the source and establishes its SHA-256, size,
+   object version, ETag, and optional Pachyderm commit.
+3. **virus_scan** (ClamAV): independently downloads and verifies the source,
+   then records the malware decision.
+4. **validate_media** (FFprobe): independently verifies the source and records
+   the format decision.
+5. **transcode** (FFmpeg): creates HLS/DASH, hashes every output, and uploads
+   each object with its SHA-256 metadata.
+6. **verify_outputs**: reads every stored output back and verifies its bytes.
+7. **mark_complete** and **verify_provenance**: close the run only after all
+   required immutable success manifests exist.
 
-2. **validate_media** (FFprobe + MediaInfo): Validates media properties
-   - Input: `/clean/<id>/<filename>`
-   - Output: `/validated/<id>/<filename>` (if valid) or `/quarantine/<id>/<filename>`
-   - Report: `/reports/<id>/validation.json`
-
-3. **route_decision**: Routes based on validation results (placeholder)
-
-4. **transcode** (FFmpeg): Generates HLS/DASH renditions
-   - Input: `/validated/<id>/<filename>`
-   - Output: `/transcoded/<id>/hls/` and `/transcoded/<id>/dash/`
-   - Report: `/reports/<id>/transcode.json`
-
-All file operations use Pachyderm S3 gateway for seamless integration with the `media` repo.
-
-The individual task implementations use Docker containers for isolation and 
-Kubernetes Pod Operator for execution on your Airflow cluster.
--# Cool
+All attempts—including failed retries—are stored under
+`provenance/<object-id>/<run-id>/`. See
+[`../../Documentation/pipeline-transparency.md`](../../Documentation/pipeline-transparency.md)
+for the contract and exact-identity requirements.

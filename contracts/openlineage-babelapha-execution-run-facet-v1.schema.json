@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/openlineage-babelapha-execution-run-facet-v1.schema.json",
+  "title": "Babelapha OpenLineage execution run facet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_producer", "_schemaURL", "manifestId", "manifestUri", "objectId", "attempt", "decision", "gitCommit", "containerDigest"],
+  "properties": {
+    "_producer": {"type": "string", "format": "uri"},
+    "_schemaURL": {"type": "string", "format": "uri"},
+    "manifestId": {"type": "string", "format": "uuid"},
+    "manifestUri": {"type": "string", "format": "uri"},
+    "objectId": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "decision": {"type": "string", "minLength": 1},
+    "gitCommit": {"type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"},
+    "containerDigest": {"type": ["string", "null"]}
+  }
+}
