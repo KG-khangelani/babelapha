@@ -14,8 +14,7 @@ Pipeline Flow:
 """
 
 import os
-import sys
-from airflow.sdk import dag, task
+from airflow.sdk import dag, task, get_current_context
 
 # Suppress slow imports during DAG parsing by setting environment variables
 # This tells the Kubernetes client to skip some initialization
@@ -29,13 +28,15 @@ S3_BUCKET = "pachyderm"
 
 default_args = dict(retries=1)
 
+
 def _create_kpo_task(task_id, image, cmd_script, name_prefix="task", startup_timeout_seconds=300):
     """Factory function to create KubernetesPodOperator tasks with deferred import.
+    
+    This function MUST be called inside a DAG context (within a @dag decorated function).
     
     Args:
         startup_timeout_seconds: How long to wait for pod to start (default 300s = 5 minutes)
     """
-    # Import ONLY when called, not at module level
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     
     return KubernetesPodOperator(
@@ -53,6 +54,7 @@ def _create_kpo_task(task_id, image, cmd_script, name_prefix="task", startup_tim
         startup_timeout_seconds=startup_timeout_seconds,
     )
 
+
 @dag(
     dag_id="ingest_pipeline",
     description="Media ingestion pipeline: validate → scan → transcode → upload",
@@ -66,9 +68,11 @@ def ingest_pipeline():
     """Media ingestion pipeline with full processing workflow."""
 
     @task
-    def validate_inputs(**context):
+    def validate_inputs():
         """Validate input parameters from DAG config."""
-        dag_run_conf = context.get('dag_run').conf or {}
+        context = get_current_context()
+        dag_run = context.get('dag_run')
+        dag_run_conf = dag_run.conf or {} if dag_run else {}
         
         # Extract parameters
         object_id = dag_run_conf.get('id', '')
@@ -318,9 +322,11 @@ exit 0
     )
 
     @task
-    def mark_complete(**context):
+    def mark_complete():
         """Mark pipeline as completed."""
-        conf = context.get('dag_run').conf or {}
+        context = get_current_context()
+        dag_run = context.get('dag_run')
+        conf = dag_run.conf or {} if dag_run else {}
         object_id = conf.get('id', 'unknown')
         print(f"[complete] Pipeline successfully completed for object_id={object_id}")
         return f"ingest_completed_{object_id}"
@@ -331,7 +337,4 @@ exit 0
 
 ingest_pipeline()
 
-
-
-
-
+## Boza fe2, cool test sign, test again test again test

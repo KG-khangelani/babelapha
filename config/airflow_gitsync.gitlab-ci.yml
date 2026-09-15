@@ -1,0 +1,116 @@
+# config/airflow-gitsync.gitlab.yml
+# NOTE:
+# - Root .gitlab-ci.yml should define the stages, e.g.:
+#     stages:
+#       - airflow
+#   and include this file.
+
+airflow_validate:
+  stage: airflow
+  image:
+    name: apache/airflow:3.1.0-python3.11
+    entrypoint: [""]
+  tags:
+    - khancreate
+  variables:
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  rules: &airflow_rules
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - pipelines/airflow/dags/**/*
+        - docker/airflow-gitsync/**/*
+        - config/*.yml
+      when: on_success
+    # Allow Web/API runs even with no diff (run automatically)
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+      when: on_success
+      allow_failure: false
+    - when: never
+  script:
+    - python docker/airflow-gitsync/validate_dags.py
+
+airflow_gitsync:
+  stage: airflow
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  tags:
+    - khancreate
+  variables:
+    WORKSPACE_DIR: "${CI_PROJECT_DIR}"
+    BUILD_NUMBER: "${CI_PIPELINE_ID}"
+    BUILD_VCS_NUMBER: "${CI_COMMIT_SHA}"
+    KUBE_SERVER: "https://k8s.khangelani.tech/"
+    KUBE_INSECURE_SKIP_TLS_VERIFY: "true"
+  needs:
+    - job: airflow_validate
+  rules: *airflow_rules
+  before_script:
+    - |
+      if [ -n "${KUBECONFIG_CONTENT_B64:-}" ]; then
+        echo "Decoding KUBECONFIG_CONTENT_B64 to /tmp/kubeconfig"
+        printf '%s' "${KUBECONFIG_CONTENT_B64}" | base64 -d > /tmp/kubeconfig
+        chmod 600 /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+      elif [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
+        echo "Using in-cluster service account"
+      elif [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
+        echo "Using KUBECONFIG file variable"
+      elif [ -n "${KUBECONFIG_CONTENT:-}" ]; then
+        echo "Writing KUBECONFIG_CONTENT to /tmp/kubeconfig"
+        printf '%s' "${KUBECONFIG_CONTENT}" > /tmp/kubeconfig
+        chmod 600 /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+      else
+        echo "✗ No Kubernetes credentials found. Set KUBECONFIG (file variable) or KUBECONFIG_CONTENT."
+        exit 1
+      fi
+      if [ -n "${KUBE_SERVER:-}" ]; then
+        CURRENT_CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
+        if [ -n "${CURRENT_CONTEXT}" ]; then
+          CLUSTER_NAME="$(kubectl config view -o jsonpath="{.contexts[?(@.name==\"${CURRENT_CONTEXT}\")].context.cluster}")"
+        fi
+        if [ -z "${CLUSTER_NAME:-}" ]; then
+          CLUSTER_NAME="$(kubectl config view -o jsonpath='{.clusters[0].name}')"
+        fi
+        if [ -z "${CLUSTER_NAME:-}" ]; then
+          echo "✗ Could not determine cluster name to update kubeconfig server."
+          exit 1
+        fi
+        echo "Setting kubeconfig server to ${KUBE_SERVER} for cluster ${CLUSTER_NAME}"
+        kubectl config set-cluster "${CLUSTER_NAME}" --server="${KUBE_SERVER}" >/dev/null
+        if [ -n "${KUBE_CA_B64:-}" ]; then
+          echo "Applying KUBE_CA_B64 to kubeconfig"
+          printf '%s' "${KUBE_CA_B64}" | base64 -d > /tmp/kube-ca.crt
+          chmod 600 /tmp/kube-ca.crt
+          kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+        elif [ "${KUBE_INSECURE_SKIP_TLS_VERIFY:-}" = "true" ]; then
+          echo "WARNING: TLS verification disabled for cluster ${CLUSTER_NAME}"
+          kubectl config set-cluster "${CLUSTER_NAME}" --insecure-skip-tls-verify=true >/dev/null
+        else
+          CA_DATA="$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CLUSTER_NAME}\")].cluster.certificate-authority-data}" 2>/dev/null || true)"
+          CA_FILE="$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CLUSTER_NAME}\")].cluster.certificate-authority}" 2>/dev/null || true)"
+          if [ -n "${CA_DATA}" ]; then
+            echo "Embedding certificate-authority-data from kubeconfig"
+            if printf '%s' "${CA_DATA}" | grep -q "BEGIN CERTIFICATE"; then
+              printf '%s' "${CA_DATA}" > /tmp/kube-ca.crt
+            else
+              if ! printf '%s' "${CA_DATA}" | base64 -d > /tmp/kube-ca.crt 2>/dev/null; then
+                echo "WARNING: Failed to decode certificate-authority-data; leaving CA unchanged."
+                rm -f /tmp/kube-ca.crt
+              fi
+            fi
+            if [ -f /tmp/kube-ca.crt ]; then
+              chmod 600 /tmp/kube-ca.crt
+              kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority=/tmp/kube-ca.crt --embed-certs=true >/dev/null
+            fi
+          elif [ -n "${CA_FILE}" ] && [ -f "${CA_FILE}" ]; then
+            echo "Embedding certificate-authority file from kubeconfig: ${CA_FILE}"
+            kubectl config set-cluster "${CLUSTER_NAME}" --certificate-authority="${CA_FILE}" --embed-certs=true >/dev/null
+          else
+            echo "WARNING: No CA data found in kubeconfig; set KUBE_CA_B64 or KUBE_INSECURE_SKIP_TLS_VERIFY=true."
+          fi
+        fi
+      fi
+  script:
+    - bash docker/airflow-gitsync/sync-to-airflow.sh

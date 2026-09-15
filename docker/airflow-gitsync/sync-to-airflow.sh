@@ -13,10 +13,24 @@ SOURCE_DIR=${SOURCE_DIR:-pipelines/airflow/dags}
 BUILD_NUMBER=${BUILD_NUMBER:-1}
 BUILD_VCS_NUMBER=${BUILD_VCS_NUMBER:-unknown}
 
-# Use in-cluster service account if available
+# Configure kubectl credentials
 if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
+    echo "Using in-cluster service account"
     export KUBERNETES_SERVICE_HOST=${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}
     export KUBERNETES_SERVICE_PORT=${KUBERNETES_SERVICE_PORT:-443}
+elif [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
+    echo "Using KUBECONFIG file: ${KUBECONFIG}"
+elif [ -n "${KUBECONFIG_CONTENT:-}" ]; then
+    echo "Writing KUBECONFIG_CONTENT to /tmp/kubeconfig"
+    printf '%s' "${KUBECONFIG_CONTENT}" > /tmp/kubeconfig
+    chmod 600 /tmp/kubeconfig
+    export KUBECONFIG=/tmp/kubeconfig
+elif [ -f "${HOME:-/root}/.kube/config" ]; then
+    export KUBECONFIG="${HOME:-/root}/.kube/config"
+    echo "Using default kubeconfig: ${KUBECONFIG}"
+else
+    echo "✗ No Kubernetes credentials found. Set KUBECONFIG or KUBECONFIG_CONTENT, or run in-cluster."
+    exit 1
 fi
 
 echo 'Configuration:'

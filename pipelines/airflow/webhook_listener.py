@@ -31,8 +31,9 @@ app = Flask(__name__)
 # Configuration
 AIRFLOW_API_URL = os.environ.get(
     "AIRFLOW_API_URL",
-    "http://airflow-webserver.airflow:8080/api/v1"
+    "http://airflow-webserver:8080/api/v1"
 )
+AIRFLOW_DAG_ID = os.environ.get("AIRFLOW_DAG_ID", "ingest_pipeline")
 PACH_INCOMING_PATH = "/incoming"  # Pachyderm path where uploads arrive
 PACH_REPO = "media"
 PACH_BRANCH = "master"
@@ -75,7 +76,7 @@ def trigger_airflow_dag(metadata: Dict[str, str]) -> bool:
         True if successful, False otherwise
     """
     try:
-        dag_run_url = f"{AIRFLOW_API_URL}/dags/ingest_pipeline/dagRuns"
+        dag_run_url = f"{AIRFLOW_API_URL}/dags/{AIRFLOW_DAG_ID}/dagRuns"
         
         payload = {
             "conf": metadata,

@@ -26,8 +26,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 AIRFLOW_API_URL = os.environ.get(
     "AIRFLOW_API_URL",
-    "http://airflow-webserver.airflow:8080/api/v1"
+    "http://airflow-webserver:8080/api/v1"
 )
+AIRFLOW_DAG_ID = os.environ.get("AIRFLOW_DAG_ID", "ingest_pipeline")
 WEBHOOK_PORT = int(os.environ.get("WEBHOOK_PORT", 8000))
 PACH_INCOMING_PATH = "/incoming"
 
@@ -56,7 +57,7 @@ def trigger_airflow_dag(metadata):
     Trigger the ingest_pipeline DAG in Airflow with the given metadata.
     """
     try:
-        dag_run_url = f"{AIRFLOW_API_URL}/dags/ingest_pipeline/dagRuns"
+        dag_run_url = f"{AIRFLOW_API_URL}/dags/{AIRFLOW_DAG_ID}/dagRuns"
         
         payload = {
             "conf": metadata,
