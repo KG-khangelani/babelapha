@@ -142,7 +142,7 @@ class ProvenanceAPITests(unittest.TestCase):
         status, payload = api.route_get("/health")
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["api_version"], "1.5.0")
+        self.assertEqual(payload["api_version"], "1.5.1")
         self.assertEqual(payload["status"], "ok")
 
     def test_catalog_is_paginated_and_adds_canonical_detail_links(self):
@@ -328,7 +328,7 @@ class ProvenanceAPITests(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"api_version": "1.5.0", "data": view})
+        self.assertEqual(payload, {"api_version": "1.5.1", "data": view})
         read.assert_called_once_with(
             object_id="interview/002",
             run_id="manual__run 42",

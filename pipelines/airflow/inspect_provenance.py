@@ -82,6 +82,28 @@ def list_media_items(
     }
 
 
+def _records_by_manifest_id(records: Iterable[dict]) -> dict[str, dict]:
+    """Index validated records without allowing an ambiguous lineage join key."""
+    indexed: dict[str, dict] = {}
+    identities: dict[str, str] = {}
+    for record in records:
+        validate_manifest(record)
+        run = record["run"]
+        manifest_id = record["manifest_id"]
+        identity = (
+            f"{run['id']}/{run['task_id']}/"
+            f"{run['attempt']}-{run['status'].lower()}"
+        )
+        if manifest_id in indexed:
+            raise ValueError(
+                f"Manifest ID {manifest_id!r} is reused by evidence identities "
+                f"{identities[manifest_id]!r} and {identity!r}"
+            )
+        indexed[manifest_id] = record
+        identities[manifest_id] = identity
+    return indexed
+
+
 def read_records(
     *,
     object_id: str,
@@ -114,6 +136,7 @@ def read_records(
             if canonical_json_bytes(record) != body:
                 raise ValueError(f"Manifest bytes are not canonical: {key}")
             records.append(record)
+    _records_by_manifest_id(records)
     return sorted(
         records,
         key=lambda record: (
@@ -156,7 +179,7 @@ def read_openlineage_delivery_evidence(
     bucket: str = "pachyderm",
 ) -> dict:
     """Join canonical manifests to their exact queued event and delivery receipt."""
-    canonical_records = {record["manifest_id"]: record for record in records}
+    canonical_records = _records_by_manifest_id(records)
     client = _s3_client(endpoint_url)
     outbox_keys = _list_json_keys(
         client,
@@ -532,9 +555,10 @@ def _artifact_evidence(run_id: str, records: list[dict]) -> list[dict]:
 
 def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict | None = None) -> dict:
     """Group validated records by Airflow run without inventing run state."""
+    records = list(records)
+    _records_by_manifest_id(records)
     grouped: dict[str, list[dict]] = {}
     for record in records:
-        validate_manifest(record)
         if record["object"]["id"] != object_id:
             raise ValueError(f"Expected object {object_id!r}, got {record['object']['id']!r}")
         grouped.setdefault(record["run"]["id"], []).append(record)

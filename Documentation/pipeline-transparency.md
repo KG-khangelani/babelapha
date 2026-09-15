@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.5.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.5.1`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -246,6 +246,9 @@ ledger exposes a SHA-256 over those canonical bytes. Its per-attempt OpenLineage
 object contains the complete outbox URI, event hash, receipt URI, endpoint,
 HTTP status, delivery time, and integrity error, so a consumer does not have to
 perform an opaque secondary join to locate the underlying evidence.
+Manifest IDs are also unique across every selected evidence set. Reusing one
+ID for two task attempts is an integrity conflict because that ID is the join
+key between a manifest, its queued OpenLineage event, and its delivery receipt.
 
 The API runs in its own non-root image rather than inheriting the Airflow
 runtime. Its Python base is digest-pinned, every Python dependency is version

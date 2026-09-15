@@ -621,6 +621,41 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertEqual(attempt["openlineage"], delivery)
         self.assertIsNot(attempt["openlineage"], delivery)
 
+    def test_manifest_id_reuse_cannot_collapse_distinct_stage_evidence(self):
+        first = sample_record()
+        second = sample_record(
+            task_id="transcode",
+            status="FAILED",
+            recorded_at="2026-09-15T08:01:00Z",
+        )
+        second["manifest_id"] = first["manifest_id"]
+        client = MemoryS3()
+        client.objects = {
+            provenance.manifest_key(record): provenance.canonical_json_bytes(record)
+            for record in (first, second)
+        }
+
+        with mock.patch.object(inspector, "_s3_client", return_value=client):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Manifest ID .* is reused by evidence identities",
+            ):
+                inspector.read_records(object_id="interview-042")
+
+        for operation in (
+            lambda: inspector.build_view("interview-042", [first, second]),
+            lambda: inspector.read_openlineage_delivery_evidence(
+                object_id="interview-042",
+                records=[first, second],
+            ),
+        ):
+            with self.subTest(operation=operation.__code__.co_firstlineno):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Manifest ID .* is reused by evidence identities",
+                ):
+                    operation()
+
     def test_media_view_joins_delivered_and_pending_openlineage_evidence(self):
         client = MemoryS3()
         delivered_record = sample_record(task_id="validate_media")
