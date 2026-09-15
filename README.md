@@ -185,6 +185,18 @@ s3://pachyderm/output/<id>/dash/*
    canonical bytes, declared identity, or self-link does not match its immutable
    S3 object key.
 
+   Verify the returned source documents, their manifest/event/receipt joins,
+   delivery states, counts, and the complete evidence-set fingerprint with the
+   standalone standard-library reference client:
+
+   ```bash
+   python pipelines/airflow/verify_evidence_bundle.py http://localhost:8010/api/v1/media/sample-001/evidence-bundle
+   ```
+
+   The verifier prints a compact `VERIFIED` receipt on success and exits with
+   code `3` when any document, cross-link, count, delivery state, or fingerprint
+   cannot be reproduced.
+
 Alternative event-driven path (closer to production):
 
 1. Send a webhook payload:

@@ -105,3 +105,10 @@ All attempts—including failed retries—are stored under
 [`../../Documentation/pipeline-transparency.md`](../../Documentation/pipeline-transparency.md)
 for the contract, exact-identity requirements, and OpenLineage recovery
 commands.
+
+After retrieving an API evidence bundle, independently verify its canonical
+documents and complete evidence-set fingerprint with:
+
+```bash
+python verify_evidence_bundle.py http://localhost:8010/api/v1/media/<object-id>/evidence-bundle
+```

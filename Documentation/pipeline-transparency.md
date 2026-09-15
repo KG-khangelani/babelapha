@@ -274,6 +274,21 @@ that fail canonical or relationship validation are not relabeled as trusted;
 they remain visible through the bundle's OpenLineage delivery states and
 integrity errors.
 
+An independent standard-library verifier is included so a consumer does not
+have to translate those rules from prose:
+
+```powershell
+python pipelines/airflow/verify_evidence_bundle.py `
+  http://localhost:8010/api/v1/media/<percent-encoded-object-id>/evidence-bundle
+```
+
+It recalculates every document hash, checks manifest/event/receipt joins and
+delivery-state links, verifies run and record counts, reconstructs the complete
+evidence-set material, and compares the final SHA-256. It accepts an HTTP(S)
+URL, a local JSON file, or `-` for stdin. Any mismatch or unverified lineage
+state exits with code `3`; a compact verification receipt is printed only when
+the selected bundle is fully verified.
+
 The API runs in its own non-root image rather than inheriting the Airflow
 runtime. Its Python base is digest-pinned, every Python dependency is version
 pinned, and CI supplies the full Git commit as the OCI image revision:
