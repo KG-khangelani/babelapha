@@ -389,7 +389,7 @@ def ingest_pipeline_local():
         inputs["provenance_decision"] = {
             "outcome": "verified",
             "reason_code": "PROVENANCE_RECORDS_COMPLETE",
-            "message": f"Verified {len(locations)} immutable provenance records.",
+            "message": f"Verified {len(locations)} immutable manifest/OpenLineage pairs.",
         }
         return inputs
 

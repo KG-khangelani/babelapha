@@ -46,6 +46,17 @@ class MemoryS3:
     def get_object(self, *, Key, **_kwargs):
         return {"Body": io.BytesIO(self.objects[Key])}
 
+    def get_paginator(self, _name):
+        client = self
+
+        class Paginator:
+            @staticmethod
+            def paginate(*, Prefix, **_kwargs):
+                keys = sorted(key for key in client.objects if key.startswith(Prefix))
+                return [{"Contents": [{"Key": key} for key in keys]}]
+
+        return Paginator()
+
 
 class ProvenanceContractTests(unittest.TestCase):
     def sample_manifest(self, **overrides):
@@ -92,6 +103,67 @@ class ProvenanceContractTests(unittest.TestCase):
         record = self.sample_manifest(container_digest=None)
         self.assertIsNone(record["execution"]["container"]["digest"])
         self.assertEqual(record["execution"]["container"]["identity_status"], "CONFIGURED_REF_ONLY")
+
+    def test_runtime_validation_rejects_extra_fields_and_false_identity_claims(self):
+        extra = self.sample_manifest()
+        extra["unexpected"] = True
+        with self.assertRaises(provenance.ManifestValidationError):
+            provenance.validate_manifest(extra)
+
+        false_identity = self.sample_manifest(container_digest=None)
+        false_identity["execution"]["container"]["identity_status"] = "VERIFIED_DIGEST"
+        with self.assertRaises(provenance.ManifestValidationError):
+            provenance.validate_manifest(false_identity)
+
+    def test_kubernetes_task_never_inherits_the_airflow_runtime_digest(self):
+        class TaskInstance:
+            task_id = "run_virus_scan"
+            dag_id = "ingest_pipeline_v2"
+            try_number = 1
+            start_date = datetime(2026, 9, 15, tzinfo=timezone.utc)
+            end_date = datetime(2026, 9, 15, 0, 0, 1, tzinfo=timezone.utc)
+            log_url = "http://airflow.example/log"
+
+            @staticmethod
+            def xcom_pull(**_kwargs):
+                return None
+
+        task = SimpleNamespace(
+            task_id="run_virus_scan",
+            dag_id="ingest_pipeline_v2",
+            image="python:3.11.16-slim-bookworm",
+            dag=SimpleNamespace(fileloc=str(MODULE_PATH)),
+        )
+        context = {
+            "task_instance": TaskInstance(),
+            "task": task,
+            "dag_run": SimpleNamespace(
+                run_id="manual__kpo-identity",
+                conf={"id": "interview-042", "filename": "interview.mp4"},
+            ),
+        }
+        runtime_digest = "sha256:" + "d" * 64
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "BABELAPHA_RUNTIME_IMAGE": "babelapha-airflow-local",
+                "BABELAPHA_RUNTIME_IMAGE_DIGEST": runtime_digest,
+            },
+            clear=False,
+        ):
+            tagged = provenance.build_airflow_manifest(context, "SUCCEEDED")
+        self.assertEqual(tagged["execution"]["container"]["image"], task.image)
+        self.assertIsNone(tagged["execution"]["container"]["digest"])
+        self.assertEqual(tagged["execution"]["container"]["identity_status"], "CONFIGURED_REF_ONLY")
+
+        with mock.patch.dict(
+            "os.environ",
+            {"BABELAPHA_RUN_VIRUS_SCAN_IMAGE_DIGEST": "sha256:" + "e" * 64},
+            clear=False,
+        ):
+            pinned = provenance.build_airflow_manifest(context, "SUCCEEDED")
+        self.assertEqual(pinned["execution"]["container"]["digest"], "sha256:" + "e" * 64)
+        self.assertEqual(pinned["execution"]["container"]["identity_status"], "VERIFIED_DIGEST")
 
     def test_pipeline_media_types_override_ambiguous_platform_defaults(self):
         self.assertEqual(provenance.artifact("s3://pachyderm/output/video.ts")["media_type"], "video/mp2t")
@@ -140,6 +212,67 @@ class ProvenanceContractTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 provenance.persist_manifest(conflict)
         self.assertEqual(client.last_put["IfNoneMatch"], "*")
+
+    def test_final_gate_validates_each_required_manifest_and_exact_outbox_event(self):
+        client = MemoryS3()
+        records = [
+            self.sample_manifest(run_id="gate-run", task_id="validate_inputs", stage="request_validated"),
+            self.sample_manifest(run_id="gate-run", task_id="transcode", stage="transcoded"),
+        ]
+        with mock.patch.object(provenance, "_s3_client", return_value=client):
+            for record in records:
+                provenance.persist_manifest(record)
+                provenance.persist_openlineage_outbox(record)
+            locations = provenance.assert_success_manifests(
+                object_id="interview-042",
+                run_id="gate-run",
+                task_ids=["validate_inputs", "transcode"],
+            )
+
+        self.assertEqual(
+            sorted(locations),
+            sorted(record["links"]["manifest"] for record in records),
+        )
+
+    def test_final_gate_rejects_missing_malformed_or_mismatched_evidence(self):
+        client = MemoryS3()
+        record = self.sample_manifest(run_id="gate-invalid", task_id="validate_inputs")
+        event = provenance.build_openlineage_event(record)
+        manifest_key = provenance.manifest_key(record)
+        outbox_key = provenance.openlineage_event_key(event, "outbox")
+        with mock.patch.object(provenance, "_s3_client", return_value=client):
+            provenance.persist_manifest(record)
+            provenance.persist_openlineage_event(event)
+
+            original_outbox = client.objects.pop(outbox_key)
+            with self.assertRaisesRegex(RuntimeError, "Invalid manifest/OpenLineage evidence"):
+                provenance.assert_success_manifests(
+                    object_id="interview-042",
+                    run_id="gate-invalid",
+                    task_ids=["validate_inputs"],
+                )
+            client.objects[outbox_key] = original_outbox
+
+            malformed = copy.deepcopy(record)
+            malformed["unexpected"] = True
+            client.objects[manifest_key] = provenance.canonical_json_bytes(malformed)
+            with self.assertRaisesRegex(RuntimeError, "ManifestValidationError"):
+                provenance.assert_success_manifests(
+                    object_id="interview-042",
+                    run_id="gate-invalid",
+                    task_ids=["validate_inputs"],
+                )
+            client.objects[manifest_key] = provenance.canonical_json_bytes(record)
+
+            mismatched = copy.deepcopy(event)
+            mismatched["run"]["facets"]["babelapha_execution"]["decisionMessage"] = "tampered"
+            client.objects[outbox_key] = provenance.canonical_json_bytes(mismatched)
+            with self.assertRaisesRegex(RuntimeError, "facts differ from the canonical manifest"):
+                provenance.assert_success_manifests(
+                    object_id="interview-042",
+                    run_id="gate-invalid",
+                    task_ids=["validate_inputs"],
+                )
 
     def test_failed_stage_uses_upstream_evidence_without_claiming_outputs(self):
         source = provenance.artifact(

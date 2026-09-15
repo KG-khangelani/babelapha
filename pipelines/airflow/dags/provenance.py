@@ -262,6 +262,9 @@ def build_manifest(
 
 
 def _validate_artifact(item: dict) -> None:
+    required = {"uri", "kind", "sha256", "size_bytes", "media_type", "integrity", "version"}
+    if not isinstance(item, dict) or set(item) != required:
+        raise ManifestValidationError("Artifact fields do not match the v1 contract")
     if item.get("kind") not in {"OBJECT", "PREFIX"}:
         raise ManifestValidationError("Artifact kind must be OBJECT or PREFIX")
     sha = item.get("sha256")
@@ -270,8 +273,32 @@ def _validate_artifact(item: dict) -> None:
     expected_integrity = "VERIFIED" if sha else "UNVERIFIED"
     if item.get("integrity") != expected_integrity:
         raise ManifestValidationError("Artifact integrity does not match its SHA-256 evidence")
-    if not str(item.get("uri", "")).strip():
+    if not isinstance(item.get("uri"), str) or not item["uri"].strip():
         raise ManifestValidationError("Artifact uri is required")
+    size = item.get("size_bytes")
+    if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
+        raise ManifestValidationError("Artifact size_bytes must be a non-negative integer or null")
+    media_type = item.get("media_type")
+    if media_type is not None and not isinstance(media_type, str):
+        raise ManifestValidationError("Artifact media_type must be a string or null")
+    version = item.get("version")
+    if not isinstance(version, dict) or set(version) != {"pachyderm_commit", "s3_version_id", "etag"}:
+        raise ManifestValidationError("Artifact version fields do not match the v1 contract")
+    if any(value is not None and not isinstance(value, str) for value in version.values()):
+        raise ManifestValidationError("Artifact version values must be strings or null")
+
+
+def _validate_timestamp(value: object, field: str, *, nullable: bool = False) -> None:
+    if value is None and nullable:
+        return
+    if not isinstance(value, str):
+        raise ManifestValidationError(f"{field} must be an ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ManifestValidationError(f"{field} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ManifestValidationError(f"{field} must include a timezone")
 
 
 def validate_manifest(record: dict) -> None:
@@ -279,32 +306,101 @@ def validate_manifest(record: dict) -> None:
         "$schema", "schema_version", "manifest_id", "recorded_at", "object",
         "run", "decision", "inputs", "outputs", "execution", "orchestrator", "links",
     }
-    missing = required.difference(record)
-    if missing:
-        raise ManifestValidationError(f"Missing manifest fields: {sorted(missing)}")
+    if not isinstance(record, dict) or set(record) != required:
+        raise ManifestValidationError("Manifest fields do not match the v1 contract")
+    if record["$schema"] != MANIFEST_SCHEMA_URI:
+        raise ManifestValidationError("Manifest schema URI is not the immutable v1 contract")
     if record["schema_version"] != SCHEMA_VERSION:
         raise ManifestValidationError(f"Unsupported schema version: {record['schema_version']}")
+    _validate_timestamp(record["recorded_at"], "recorded_at")
     try:
         uuid.UUID(record["manifest_id"])
     except (ValueError, TypeError) as exc:
         raise ManifestValidationError("manifest_id must be a UUID") from exc
+    object_identity = record["object"]
+    if not isinstance(object_identity, dict) or set(object_identity) != {"id", "filename"}:
+        raise ManifestValidationError("Manifest object fields do not match the v1 contract")
+    if any(not isinstance(object_identity[field], str) or not object_identity[field].strip() for field in ("id", "filename")):
+        raise ManifestValidationError("Manifest object id and filename are required")
     run = record["run"]
+    run_fields = {
+        "id", "dag_id", "task_id", "stage", "attempt", "status",
+        "started_at", "completed_at", "duration_ms",
+    }
+    if not isinstance(run, dict) or set(run) != run_fields:
+        raise ManifestValidationError("Manifest run fields do not match the v1 contract")
+    for field in ("id", "dag_id", "task_id", "stage"):
+        if not isinstance(run[field], str) or not run[field].strip():
+            raise ManifestValidationError(f"Manifest run {field} is required")
     if run.get("status") not in VALID_STATUSES:
         raise ManifestValidationError(f"Unsupported run status: {run.get('status')}")
-    if not isinstance(run.get("attempt"), int) or run["attempt"] < 1:
+    if not isinstance(run.get("attempt"), int) or isinstance(run["attempt"], bool) or run["attempt"] < 1:
         raise ManifestValidationError("Attempt must be a positive integer")
-    reason_code = record["decision"].get("reason_code", "")
+    _validate_timestamp(run["started_at"], "run.started_at", nullable=True)
+    _validate_timestamp(run["completed_at"], "run.completed_at")
+    duration = run["duration_ms"]
+    if duration is not None and (not isinstance(duration, int) or isinstance(duration, bool) or duration < 0):
+        raise ManifestValidationError("run.duration_ms must be a non-negative integer or null")
+    decision = record["decision"]
+    if not isinstance(decision, dict) or set(decision) != {"outcome", "reason_code", "message"}:
+        raise ManifestValidationError("Manifest decision fields do not match the v1 contract")
+    if not isinstance(decision["outcome"], str) or not decision["outcome"].strip():
+        raise ManifestValidationError("Decision outcome is required")
+    if not isinstance(decision["message"], str):
+        raise ManifestValidationError("Decision message must be a string")
+    reason_code = decision.get("reason_code", "")
     if not re.fullmatch(r"[A-Z0-9_]+", reason_code):
         raise ManifestValidationError("Decision reason_code must be uppercase snake case")
+    if not isinstance(record["inputs"], list) or not isinstance(record["outputs"], list):
+        raise ManifestValidationError("Manifest inputs and outputs must be arrays")
     for item in [*record["inputs"], *record["outputs"]]:
         _validate_artifact(item)
-    container = record["execution"]["container"]
+    execution = record["execution"]
+    if not isinstance(execution, dict) or set(execution) != {"git", "code", "container", "parameters"}:
+        raise ManifestValidationError("Manifest execution fields do not match the v1 contract")
+    git = execution["git"]
+    if not isinstance(git, dict) or set(git) != {"repository", "commit"}:
+        raise ManifestValidationError("Manifest Git fields do not match the v1 contract")
+    if not isinstance(git["repository"], str):
+        raise ManifestValidationError("Git repository must be a string")
+    code = execution["code"]
+    if not isinstance(code, dict) or set(code) != {"path", "sha256"}:
+        raise ManifestValidationError("Manifest code fields do not match the v1 contract")
+    if not isinstance(code["path"], str) or not code["path"].strip():
+        raise ManifestValidationError("Code path is required")
+    code_sha = code["sha256"]
+    if code_sha is not None and not SHA256_RE.fullmatch(code_sha):
+        raise ManifestValidationError("Code sha256 must be 64 lowercase hex characters or null")
+    container = execution["container"]
+    if not isinstance(container, dict) or set(container) != {"image", "digest", "identity_status"}:
+        raise ManifestValidationError("Manifest container fields do not match the v1 contract")
+    if not isinstance(container["image"], str) or not container["image"].strip():
+        raise ManifestValidationError("Container image is required")
     digest = container.get("digest")
     if digest is not None and not DIGEST_RE.fullmatch(digest):
         raise ManifestValidationError("Container digest must be sha256:<64 lowercase hex>")
-    git_commit = record["execution"]["git"].get("commit")
+    expected_identity = "VERIFIED_DIGEST" if digest else "CONFIGURED_REF_ONLY"
+    if container["identity_status"] != expected_identity:
+        raise ManifestValidationError("Container identity status does not match its digest evidence")
+    if not isinstance(execution["parameters"], dict):
+        raise ManifestValidationError("Execution parameters must be an object")
+    git_commit = git.get("commit")
     if git_commit is not None and not GIT_SHA_RE.fullmatch(git_commit):
         raise ManifestValidationError("Git commit must be a full 40- or 64-character lowercase SHA")
+    orchestrator = record["orchestrator"]
+    if not isinstance(orchestrator, dict) or set(orchestrator) != {"name", "version"}:
+        raise ManifestValidationError("Manifest orchestrator fields do not match the v1 contract")
+    if orchestrator["name"] != "airflow":
+        raise ManifestValidationError("Manifest orchestrator must be airflow")
+    if orchestrator["version"] is not None and not isinstance(orchestrator["version"], str):
+        raise ManifestValidationError("Orchestrator version must be a string or null")
+    links = record["links"]
+    if not isinstance(links, dict) or set(links) != {"manifest", "airflow_log"}:
+        raise ManifestValidationError("Manifest link fields do not match the v1 contract")
+    if not isinstance(links["manifest"], str) or not links["manifest"].startswith("s3://"):
+        raise ManifestValidationError("Manifest link must be an S3 URI")
+    if links["airflow_log"] is not None and not isinstance(links["airflow_log"], str):
+        raise ManifestValidationError("Airflow log link must be a string or null")
 
 
 def _s3_client(endpoint_url: str | None = None):
@@ -418,7 +514,7 @@ def assert_success_manifests(
     endpoint_url: str | None = None,
     bucket: str | None = None,
 ) -> list[str]:
-    """Fail the pipeline if any required successful task record is absent."""
+    """Require schema-valid success manifests and their exact queued lineage events."""
     target_bucket = bucket or os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm")
     prefix = manifest_prefix(object_id, run_id)
     client = _s3_client(endpoint_url or os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT"))
@@ -428,14 +524,53 @@ def assert_success_manifests(
         for page in paginator.paginate(Bucket=target_bucket, Prefix=prefix)
         for item in page.get("Contents", [])
     }
+    required_keys: list[str] = []
     missing = []
-    for task_id in task_ids:
+    for task_id in dict.fromkeys(task_ids):
         task_prefix = f"{prefix}{_safe_segment(task_id)}/"
-        if not any(key.startswith(task_prefix) and key.endswith("-succeeded.json") for key in keys):
+        task_keys = sorted(
+            key for key in keys if key.startswith(task_prefix) and key.endswith("-succeeded.json")
+        )
+        if not task_keys:
             missing.append(task_id)
+        required_keys.extend(task_keys)
     if missing:
         raise RuntimeError(f"Missing immutable success manifests for: {', '.join(missing)}")
-    return [f"s3://{target_bucket}/{key}" for key in sorted(keys)]
+
+    problems = []
+    locations = []
+    for key in required_keys:
+        try:
+            manifest_body = client.get_object(Bucket=target_bucket, Key=key)["Body"].read()
+            record = json.loads(manifest_body)
+            validate_manifest(record)
+            if record["object"]["id"] != object_id:
+                raise ManifestValidationError("manifest object ID does not match the requested object")
+            if record["run"]["id"] != run_id:
+                raise ManifestValidationError("manifest run ID does not match the requested run")
+            if record["run"]["task_id"] not in task_ids or record["run"]["status"] != "SUCCEEDED":
+                raise ManifestValidationError("manifest task or status does not match the required success record")
+            if manifest_key(record) != key:
+                raise ManifestValidationError("manifest identity does not match its immutable object key")
+            manifest_uri = f"s3://{target_bucket}/{key}"
+            if record["links"]["manifest"] != manifest_uri:
+                raise ManifestValidationError("manifest link does not match its immutable object key")
+
+            expected_event = build_openlineage_event(record)
+            outbox_key = openlineage_event_key(expected_event, "outbox")
+            event_body = client.get_object(Bucket=target_bucket, Key=outbox_key)["Body"].read()
+            event = json.loads(event_body)
+            if canonical_json_bytes(event) != event_body:
+                raise ManifestValidationError("queued OpenLineage event bytes are not canonical")
+            if openlineage_event_key(event, "outbox") != outbox_key:
+                raise ManifestValidationError("queued OpenLineage event identity does not match its object key")
+            validate_openlineage_event_for_manifest(event, record)
+            locations.append(manifest_uri)
+        except Exception as exc:
+            problems.append(f"{key}: {type(exc).__name__}: {exc}")
+    if problems:
+        raise RuntimeError("Invalid manifest/OpenLineage evidence:\n- " + "\n- ".join(problems))
+    return locations
 
 
 def _artifact_facet(item: dict) -> dict:
@@ -556,6 +691,22 @@ def _openlineage_execution_facet(event: dict) -> dict:
                     f"OpenLineage {role} dataset is missing its Babelapha artifact facet"
                 ) from exc
     return facet
+
+
+def validate_openlineage_event_for_manifest(event: dict, record: dict) -> None:
+    """Prove that one queued event carries every fact from its canonical manifest."""
+    validate_manifest(record)
+    _openlineage_execution_facet(event)
+    try:
+        namespace = event["job"]["namespace"]
+    except (KeyError, TypeError) as exc:
+        raise ManifestValidationError("OpenLineage job namespace is missing") from exc
+    if not isinstance(namespace, str) or not namespace.strip():
+        raise ManifestValidationError("OpenLineage job namespace is required")
+    expected = build_openlineage_event(record)
+    expected["job"]["namespace"] = namespace
+    if event != expected:
+        raise ManifestValidationError("OpenLineage event facts differ from the canonical manifest")
 
 
 def openlineage_event_key(event: dict, state: str) -> str:
@@ -874,9 +1025,14 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             "message": decision.get("message", "Task completed successfully"),
         }
     code_path, code_sha = _dag_code_identity(context)
-    image = str(getattr(task, "image", None) or os.environ.get("BABELAPHA_RUNTIME_IMAGE", "apache-airflow"))
     task_env_key = re.sub(r"[^A-Z0-9]", "_", task_id.upper())
-    digest = os.environ.get(f"BABELAPHA_{task_env_key}_IMAGE_DIGEST") or os.environ.get("BABELAPHA_RUNTIME_IMAGE_DIGEST")
+    task_image = getattr(task, "image", None)
+    if task_image:
+        image = str(task_image)
+        digest = os.environ.get(f"BABELAPHA_{task_env_key}_IMAGE_DIGEST")
+    else:
+        image = os.environ.get("BABELAPHA_RUNTIME_IMAGE", "apache-airflow")
+        digest = os.environ.get("BABELAPHA_RUNTIME_IMAGE_DIGEST")
     bucket = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm")
     manifest_inputs = payload.get("provenance_inputs") or []
     if not manifest_inputs and payload.get("s3_input_key"):

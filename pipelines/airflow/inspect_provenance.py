@@ -19,11 +19,11 @@ from provenance import (  # noqa: E402
     _openlineage_execution_facet,
     _s3_client,
     _safe_segment,
-    build_openlineage_event,
     canonical_json_bytes,
     manifest_prefix,
     openlineage_event_key,
     validate_manifest,
+    validate_openlineage_event_for_manifest,
     validate_openlineage_receipt,
 )
 
@@ -137,10 +137,7 @@ def read_openlineage_delivery_evidence(
             manifest = canonical_records.get(manifest_id)
             if manifest is None:
                 raise ValueError(f"queued event references unknown manifest {manifest_id}")
-            expected_event = build_openlineage_event(manifest)
-            expected_event["job"]["namespace"] = event["job"]["namespace"]
-            if event != expected_event:
-                raise ValueError("queued event facts differ from the canonical manifest")
+            validate_openlineage_event_for_manifest(event, manifest)
             state = {
                 "state": "PENDING",
                 "integrity": "VERIFIED",

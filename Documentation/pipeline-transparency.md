@@ -53,7 +53,10 @@ retry therefore preserves the failed attempt instead of overwriting it. The
 Airflow callbacks never overwrite a non-identical existing record. Both the
 local and production DAGs end with a `verify_provenance` task; a successful
 pipeline cannot pass that gate when any required upstream success manifest is
-missing.
+missing, malformed, stored under the wrong identity key, or lacks its exact
+canonical OpenLineage outbox event. The gate validates manifest contents and
+proves the queued execution and artifact facts match before declaring the run's
+provenance complete.
 
 The write uses the S3 `If-None-Match: *` precondition, so append-only behavior
 is atomic even when duplicate callbacks race. Re-emitting identical bytes is
@@ -81,6 +84,11 @@ BABELAPHA_TRANSCODE_IMAGE=registry.example/transcode@sha256:<64 hex>
 
 For local Airflow, inject the result of `docker image inspect` as
 `BABELAPHA_RUNTIME_IMAGE_DIGEST` when exact container reproduction is required.
+That digest applies only to tasks executing inside the Airflow container. A
+Kubernetes pod task never inherits it: the pod image must contain its own
+`@sha256:` digest or have a task-specific
+`BABELAPHA_<TASK_ID>_IMAGE_DIGEST` value. Otherwise it remains honestly marked
+`CONFIGURED_REF_ONLY`.
 Set `BABELAPHA_GIT_SHA` to the full 40- or 64-character commit SHA. Short or
 symbolic refs are not accepted as exact identities. The DAG-file SHA-256 remains
 exact even in an uncommitted local working tree. The production DAG sync also
