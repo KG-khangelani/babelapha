@@ -112,9 +112,11 @@ def ingest_pipeline_local():
         if not object_id or not filename:
             raise ValueError(f"Missing required parameters: id={object_id}, filename={filename}")
 
+        pachyderm_commit = str(conf.get("pachyderm_commit", "")).strip() or None
         return {
             "object_id": object_id,
             "filename": filename,
+            "pachyderm_commit": pachyderm_commit,
             "s3_bucket": S3_BUCKET,
             "s3_input_key": f"incoming/{object_id}/{filename}",
             "s3_output_key": f"output/{object_id}",

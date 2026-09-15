@@ -5,6 +5,11 @@ immutable provenance evidence plus replayable OpenLineage events.
 `ingest_pipeline` is the production Kubernetes flow; `ingest_pipeline_local`
 is the Docker Compose flow. Each event is durably queued before delivery and a
 separate immutable receipt records acceptance by Marquez.
+`ingest_pipeline_v2` is a provenance-gated Kubernetes boundary diagnostic. It
+does not process media and explicitly records empty outputs and
+`diagnostic_only` decisions instead of synthetic media verdicts.
+All webhook adapters require and preserve the exact Pachyderm commit ID and use
+it to derive an idempotent Airflow run ID.
 
 ## Triggering Methods
 

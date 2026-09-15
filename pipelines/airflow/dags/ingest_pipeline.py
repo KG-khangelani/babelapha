@@ -122,14 +122,21 @@ def ingest_pipeline():
         if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
             raise RuntimeError("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be injected by the deployment")
         input_key = f"incoming/{object_id}/{filename}"
+        pachyderm_commit = str(conf.get("pachyderm_commit", "")).strip() or None
         return {
             "object_id": object_id,
             "filename": filename,
+            "pachyderm_commit": pachyderm_commit,
             "s3_bucket": S3_BUCKET,
             "s3_input_key": input_key,
             "s3_output_key": f"output/{object_id}",
             "provenance_stage": "request_validated",
-            "provenance_inputs": [artifact(f"s3://{S3_BUCKET}/{input_key}")],
+            "provenance_inputs": [
+                artifact(
+                    f"s3://{S3_BUCKET}/{input_key}",
+                    pachyderm_commit=pachyderm_commit,
+                )
+            ],
             "provenance_decision": {
                 "outcome": "accepted",
                 "reason_code": "INPUT_PARAMETERS_ACCEPTED",

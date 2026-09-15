@@ -40,7 +40,8 @@ curl -X POST http://localhost:8001/webhook/pachyderm \
   -H "Content-Type: application/json" \
   -d '{
     "action": "put_file",
-    "path": "/incoming/test-001/test.mp4"
+    "path": "/incoming/test-001/test.mp4",
+    "commit": {"id": "manual-test-commit"}
   }'
 ```
 
@@ -94,7 +95,9 @@ kubectl -n airflow exec <pod-name> -- python3 -c \
 
 All webhook code is committed to `babelapha` repository:
 - `pipelines/airflow/webhook_listener_stdlib.py` - Main webhook service
+- `pipelines/airflow/webhook_payload.py` - Validated commit/object identity contract
 - `pipelines/airflow/webhook-deployment.yaml` - K8s manifests
+- `pipelines/airflow/kustomization.yaml` - Generates the executable code ConfigMap
 - `pipelines/airflow/WEBHOOK_SETUP.md` - Full setup guide
 
 Control node infrastructure is in `khancreate_infra` repository:

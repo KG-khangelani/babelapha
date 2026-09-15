@@ -384,6 +384,20 @@ def validate_manifest(record: dict) -> None:
         raise ManifestValidationError("Container identity status does not match its digest evidence")
     if not isinstance(execution["parameters"], dict):
         raise ManifestValidationError("Execution parameters must be an object")
+    parameters = execution["parameters"]
+    if "pachyderm_commit" in parameters:
+        parameter_commit = parameters["pachyderm_commit"]
+        if parameter_commit is not None and (
+            not isinstance(parameter_commit, str) or not parameter_commit.strip()
+        ):
+            raise ManifestValidationError("Execution Pachyderm commit must be a non-empty string or null")
+        artifact_commits = {
+            item["version"]["pachyderm_commit"]
+            for item in [*record["inputs"], *record["outputs"]]
+            if item["version"]["pachyderm_commit"] is not None
+        }
+        if artifact_commits - {parameter_commit}:
+            raise ManifestValidationError("Artifact Pachyderm commit differs from execution parameters")
     git_commit = git.get("commit")
     if git_commit is not None and not GIT_SHA_RE.fullmatch(git_commit):
         raise ManifestValidationError("Git commit must be a full 40- or 64-character lowercase SHA")
@@ -1008,6 +1022,15 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
     dag_id = str(getattr(ti, "dag_id", getattr(task, "dag_id", "unknown")))
     run_id = str(getattr(dag_run, "run_id", context.get("run_id", "unknown")))
     attempt = max(1, int(getattr(ti, "try_number", 1) or 1))
+    payload_commit_value = payload.get("pachyderm_commit")
+    conf_commit_value = conf.get("pachyderm_commit")
+    payload_commit = str(payload_commit_value).strip() if payload_commit_value is not None else None
+    conf_commit = str(conf_commit_value).strip() if conf_commit_value is not None else None
+    payload_commit = payload_commit or None
+    conf_commit = conf_commit or None
+    if payload_commit and conf_commit and payload_commit != conf_commit:
+        raise ManifestValidationError("Task payload Pachyderm commit differs from dag_run.conf")
+    pachyderm_commit = payload_commit or conf_commit
     completed = getattr(ti, "end_date", None) or datetime.now(timezone.utc)
     started = getattr(ti, "start_date", None)
     error = context.get("exception")
@@ -1036,7 +1059,12 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
     bucket = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm")
     manifest_inputs = payload.get("provenance_inputs") or []
     if not manifest_inputs and payload.get("s3_input_key"):
-        manifest_inputs = [artifact(f"s3://{payload.get('s3_bucket', bucket)}/{payload['s3_input_key']}")]
+        manifest_inputs = [
+            artifact(
+                f"s3://{payload.get('s3_bucket', bucket)}/{payload['s3_input_key']}",
+                pachyderm_commit=pachyderm_commit,
+            )
+        ]
     manifest_outputs = payload.get("provenance_outputs") or [] if status == "SUCCEEDED" else []
     return build_manifest(
         object_id=object_id,
@@ -1058,7 +1086,11 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
         code_sha256=code_sha,
         container_image=image,
         container_digest=digest,
-        parameters={"object_id": object_id, "filename": filename},
+        parameters={
+            "object_id": object_id,
+            "filename": filename,
+            "pachyderm_commit": pachyderm_commit,
+        },
         airflow_version=_package_version("apache-airflow"),
         airflow_log_url=getattr(ti, "log_url", None),
         bucket=bucket,

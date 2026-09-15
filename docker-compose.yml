@@ -111,6 +111,7 @@ services:
       AIRFLOW_DAG_ID: ${AIRFLOW_DAG_ID:-ingest_pipeline_local}
     volumes:
       - ./pipelines/airflow/webhook_listener_airflow3.py:/app/webhook_listener_airflow3.py:ro
+      - ./pipelines/airflow/webhook_payload.py:/app/webhook_payload.py:ro
     command: python /app/webhook_listener_airflow3.py
     ports:
       - "8000:8000"

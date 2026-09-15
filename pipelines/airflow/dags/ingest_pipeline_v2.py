@@ -1,22 +1,52 @@
-"""
-Simplified ingest pipeline with focused sub-stages for better debugging and control.
+"""Experimental ingestion diagnostics with the full provenance contract.
 
-Architecture:
-- Each stage has clear inputs/outputs
-- Minimal operator configuration to reduce failure modes
-- Explicit error handling at each step
-- Pure Python for control flow, KPO only for actual processing
-- Deferred KubernetesPodOperator import to avoid slow provider initialization
+This DAG exercises the Kubernetes stage boundaries without processing media.
+Every decision therefore says that it is diagnostic-only, every pod returns its
+own callback payload, and the run cannot finish without validating the exact
+manifest/OpenLineage pair for every preceding task.
 """
-from airflow.sdk import dag, task, get_current_context
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
 import os
-from datetime import datetime
+
+from airflow.sdk import dag, get_current_context, task
 
 from provenance import (
+    artifact,
+    assert_success_manifests,
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
 )
+
+
+S3_BUCKET = os.environ.get("S3_BUCKET", "pachyderm")
+PROVENANCE_S3_ENDPOINT = os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT")
+PROVENANCE_S3_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET", S3_BUCKET)
+
+# Pin the diagnostic runtime so every Kubernetes callback can recover the exact
+# registry digest directly from ``task.image`` without inheriting Airflow's
+# unrelated runtime digest.
+DIAGNOSTIC_IMAGE = os.environ.get(
+    "BABELAPHA_DIAGNOSTIC_IMAGE",
+    "python@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84",
+)
+
+REQUIRED_PROVENANCE_TASKS = [
+    "validate_inputs",
+    "pre_scan_check",
+    "run_virus_scan",
+    "post_scan_check",
+    "pre_validate_check",
+    "run_media_validation",
+    "post_validate_check",
+    "pre_transcode_check",
+    "run_transcode",
+    "post_transcode_check",
+    "finalize",
+]
 
 default_args = {
     "retries": 1,
@@ -25,194 +55,267 @@ default_args = {
     "on_retry_callback": provenance_retry_callback,
 }
 
+
+def _diagnostic_payload(
+    inputs: dict,
+    *,
+    stage: str,
+    reason_code: str,
+    message: str,
+) -> dict:
+    """Carry object identity while making the non-media result explicit."""
+    return {
+        **inputs,
+        "provenance_stage": stage,
+        "provenance_inputs": inputs.get("provenance_inputs", []),
+        "provenance_outputs": [],
+        "provenance_decision": {
+            "outcome": "diagnostic_only",
+            "reason_code": reason_code,
+            "message": message,
+        },
+    }
+
+
+def _pod_script(*, stage: str, reason_code: str, message: str) -> str:
+    """Return a pod script that writes an honest Airflow XCom payload."""
+    return f"""
+import json
+import os
+import time
+
+time.sleep(2)
+payload = {{
+    "object_id": os.environ["OBJECT_ID"],
+    "filename": os.environ["FILENAME"],
+    "provenance_stage": {stage!r},
+    "provenance_inputs": [],
+    "provenance_outputs": [],
+    "provenance_decision": {{
+        "outcome": "diagnostic_only",
+        "reason_code": {reason_code!r},
+        "message": {message!r},
+    }},
+}}
+with open("/airflow/xcom/return.json", "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+print(payload["provenance_decision"]["message"])
+"""
+
+
 @dag(
     dag_id="ingest_pipeline_v2",
-    description="Simplified media ingestion pipeline with micro-stages",
-    
+    description="Experimental Kubernetes stage diagnostics with immutable provenance",
     schedule=None,
     catchup=False,
     default_args=default_args,
     max_active_runs=8,
-    tags=["ingest", "pachyderm", "media", "v2"],
+    tags=["ingest", "diagnostic", "media", "v2", "openlineage"],
 )
 def ingest_pipeline_v2():
-    """Simplified pipeline with clear stage separation."""
-    # Deferred imports to avoid slow provider manager initialization during DAG parsing
+    """Exercise stage isolation without claiming that media was processed."""
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-    from airflow.providers.cncf.kubernetes.secret import Secret
-    from kubernetes.client import models as k8s
-    
+
     @task(retries=0)
-    def validate_inputs():
-        """Validate that required parameters are present."""
+    def validate_inputs() -> dict:
         context = get_current_context()
-        dag_run = context.get('dag_run')
+        dag_run = context.get("dag_run")
         conf = dag_run.conf or {} if dag_run else {}
-        obj_id = conf.get('id', 'default-id')
-        filename = conf.get('filename', 'default.mp4')
-        
-        print(f"[validate_inputs] Received: id={obj_id}, filename={filename}")
-        if not obj_id or not filename:
-            raise ValueError(f"Missing required parameters: id={obj_id}, filename={filename}")
-        
+        object_id = str(conf.get("id", "")).strip()
+        filename = str(conf.get("filename", "")).strip()
+        if not object_id or not filename:
+            raise ValueError(f"Missing required parameters: id={object_id}, filename={filename}")
+
+        pachyderm_commit = str(conf.get("pachyderm_commit", "")).strip() or None
+        source = artifact(
+            f"s3://{S3_BUCKET}/incoming/{object_id}/{filename}",
+            pachyderm_commit=pachyderm_commit,
+        )
         return {
-            'id': obj_id,
-            'filename': filename,
-            'timestamp': datetime.utcnow().isoformat(),
+            "object_id": object_id,
+            "filename": filename,
+            "pachyderm_commit": pachyderm_commit,
+            "requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "provenance_stage": "diagnostic_request_validated",
+            "provenance_inputs": [source],
+            "provenance_outputs": [],
+            "provenance_decision": {
+                "outcome": "accepted",
+                "reason_code": "DIAGNOSTIC_PARAMETERS_ACCEPTED",
+                "message": "The diagnostic object identifier and filename are present; media bytes were not inspected.",
+            },
         }
 
     @task
-    def stage_info(stage_name: str):
-        """Log stage execution info."""
-        print(f"\n{'='*60}")
-        print(f"[STAGE] {stage_name}")
-        print(f"{'='*60}\n")
-        return stage_name
+    def pre_scan_check(inputs: dict) -> dict:
+        return _diagnostic_payload(
+            inputs,
+            stage="diagnostic_virus_scan_precheck",
+            reason_code="DIAGNOSTIC_SCAN_BOUNDARY_READY",
+            message="The virus-scan pod boundary is ready; no media bytes were inspected.",
+        )
 
-    # ============================================================================
-    # STAGE 1: Virus Scanning (Simplified)
-    # ============================================================================
-    
     @task
-    def pre_scan_check(inputs: dict):
-        """Check if files are accessible for scanning."""
-        print(f"[pre_scan_check] Verifying input files exist: {inputs['filename']}")
-        # In real scenario, would check S3/Pachyderm connectivity
-        return {**inputs, 'scan_ready': True}
+    def post_scan_check(scan_result: dict) -> dict:
+        return _diagnostic_payload(
+            scan_result,
+            stage="diagnostic_virus_scan_postcheck",
+            reason_code="DIAGNOSTIC_SCAN_BOUNDARY_COMPLETED",
+            message="The virus-scan diagnostic pod completed; no malware verdict was produced.",
+        )
+
+    @task
+    def pre_validate_check(scan_data: dict) -> dict:
+        return _diagnostic_payload(
+            scan_data,
+            stage="diagnostic_media_validation_precheck",
+            reason_code="DIAGNOSTIC_VALIDATION_BOUNDARY_READY",
+            message="The media-validation pod boundary is ready; no media bytes were inspected.",
+        )
+
+    @task
+    def post_validate_check(validate_result: dict) -> dict:
+        return _diagnostic_payload(
+            validate_result,
+            stage="diagnostic_media_validation_postcheck",
+            reason_code="DIAGNOSTIC_VALIDATION_BOUNDARY_COMPLETED",
+            message="The media-validation diagnostic pod completed; no format verdict was produced.",
+        )
+
+    @task
+    def pre_transcode_check(validate_data: dict) -> dict:
+        return _diagnostic_payload(
+            validate_data,
+            stage="diagnostic_transcode_precheck",
+            reason_code="DIAGNOSTIC_TRANSCODE_BOUNDARY_READY",
+            message="The transcode pod boundary is ready; no media bytes were inspected.",
+        )
+
+    @task
+    def post_transcode_check(transcode_result: dict) -> dict:
+        return _diagnostic_payload(
+            transcode_result,
+            stage="diagnostic_transcode_postcheck",
+            reason_code="DIAGNOSTIC_TRANSCODE_BOUNDARY_COMPLETED",
+            message="The transcode diagnostic pod completed; no renditions were produced.",
+        )
+
+    @task
+    def finalize(final_status: dict) -> dict:
+        return _diagnostic_payload(
+            final_status,
+            stage="diagnostic_pipeline_complete",
+            reason_code="DIAGNOSTIC_PIPELINE_COMPLETED",
+            message="All experimental stage-boundary checks completed without claiming media-processing results.",
+        )
+
+    @task(retries=0)
+    def verify_provenance(inputs: dict) -> dict:
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        locations = assert_success_manifests(
+            object_id=inputs["object_id"],
+            run_id=dag_run.run_id,
+            task_ids=REQUIRED_PROVENANCE_TASKS,
+            endpoint_url=PROVENANCE_S3_ENDPOINT,
+            bucket=PROVENANCE_S3_BUCKET,
+        )
+        inputs["provenance_stage"] = "provenance_verified"
+        inputs["provenance_inputs"] = []
+        inputs["provenance_outputs"] = []
+        inputs["provenance_decision"] = {
+            "outcome": "verified",
+            "reason_code": "PROVENANCE_RECORDS_COMPLETE",
+            "message": f"Verified {len(locations)} immutable manifest/OpenLineage pairs.",
+        }
+        return inputs
+
+    pod_env = {
+        "OBJECT_ID": "{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}",
+        "FILENAME": "{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}",
+    }
 
     scan_pod = KubernetesPodOperator(
         task_id="run_virus_scan",
-        name="virus-scan-pod",
+        name="virus-scan-diagnostic-pod",
         namespace="airflow",
-        image="python:3.11.16-slim-bookworm",
-        image_pull_policy="Always",
+        image=DIAGNOSTIC_IMAGE,
+        image_pull_policy="IfNotPresent",
         cmds=["python3", "-c"],
         arguments=[
-            "print('Starting virus scan...'); "
-            "import time; time.sleep(2); "
-            "print('Scan complete: No threats detected'); "
-            "exit(0)"
+            _pod_script(
+                stage="diagnostic_virus_scan",
+                reason_code="DIAGNOSTIC_SCAN_POD_COMPLETED",
+                message="The virus-scan diagnostic pod executed; no malware verdict was produced.",
+            )
         ],
+        env_vars=pod_env,
         in_cluster=True,
         get_logs=True,
-        is_delete_operator_pod=False,  # Keep pod for debugging
+        do_xcom_push=True,
+        is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
     )
-
-    @task
-    def post_scan_check(scan_result):
-        """Verify scan completed successfully."""
-        print(f"[post_scan_check] Scan verification passed")
-        return {'scan_passed': True}
-
-    # ============================================================================
-    # STAGE 2: Media Validation (Simplified)
-    # ============================================================================
-
-    @task
-    def pre_validate_check(scan_data: dict):
-        """Check pre-validation status."""
-        print(f"[pre_validate_check] Preparing for validation")
-        return {**scan_data, 'validate_ready': True}
 
     validate_pod = KubernetesPodOperator(
         task_id="run_media_validation",
-        name="validate-media-pod",
+        name="media-validation-diagnostic-pod",
         namespace="airflow",
-        image="python:3.11.16-slim-bookworm",
-        image_pull_policy="Always",
+        image=DIAGNOSTIC_IMAGE,
+        image_pull_policy="IfNotPresent",
         cmds=["python3", "-c"],
         arguments=[
-            "print('Starting media validation...'); "
-            "import time; time.sleep(2); "
-            "print('Validation complete: Format OK'); "
-            "exit(0)"
+            _pod_script(
+                stage="diagnostic_media_validation",
+                reason_code="DIAGNOSTIC_VALIDATION_POD_COMPLETED",
+                message="The media-validation diagnostic pod executed; no format verdict was produced.",
+            )
         ],
+        env_vars=pod_env,
         in_cluster=True,
         get_logs=True,
+        do_xcom_push=True,
         is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
     )
-
-    @task
-    def post_validate_check(validate_result):
-        """Verify validation completed successfully."""
-        print(f"[post_validate_check] Validation verification passed")
-        return {'validation_passed': True}
-
-    # ============================================================================
-    # STAGE 3: Transcoding (Simplified)
-    # ============================================================================
-
-    @task
-    def pre_transcode_check(validate_data: dict):
-        """Check pre-transcoding status."""
-        print(f"[pre_transcode_check] Preparing for transcoding")
-        return {**validate_data, 'transcode_ready': True}
 
     transcode_pod = KubernetesPodOperator(
         task_id="run_transcode",
-        name="transcode-pod",
+        name="transcode-diagnostic-pod",
         namespace="airflow",
-        image="python:3.11.16-slim-bookworm",
-        image_pull_policy="Always",
+        image=DIAGNOSTIC_IMAGE,
+        image_pull_policy="IfNotPresent",
         cmds=["python3", "-c"],
         arguments=[
-            "print('Starting transcoding...'); "
-            "import time; time.sleep(2); "
-            "print('Transcoding complete: HLS+DASH generated'); "
-            "exit(0)"
+            _pod_script(
+                stage="diagnostic_transcode",
+                reason_code="DIAGNOSTIC_TRANSCODE_POD_COMPLETED",
+                message="The transcode diagnostic pod executed; no renditions were produced.",
+            )
         ],
+        env_vars=pod_env,
         in_cluster=True,
         get_logs=True,
+        do_xcom_push=True,
         is_delete_operator_pod=False,
         node_selector={"kubernetes.io/arch": "amd64"},
     )
 
-    @task
-    def post_transcode_check(transcode_result):
-        """Verify transcoding completed successfully."""
-        print(f"[post_transcode_check] Transcoding verification passed")
-        return {'transcoding_passed': True}
-
-    # ============================================================================
-    # STAGE 4: Finalization
-    # ============================================================================
-
-    @task
-    def finalize(final_status: dict):
-        """Summarize pipeline execution."""
-        print(f"\n{'='*60}")
-        print(f"[PIPELINE COMPLETE]")
-        print(f"Status: {final_status}")
-        print(f"{'='*60}\n")
-        return {'status': 'SUCCESS', 'final_data': final_status}
-
-    # Build the DAG
     inputs = validate_inputs()
-    
-    stage1 = stage_info("VIRUS SCANNING")
     pre_scan = pre_scan_check(inputs)
-    scan = scan_pod
-    post_scan = post_scan_check(scan)
-    
-    stage2 = stage_info("MEDIA VALIDATION")
-    pre_validate = pre_validate_check(post_scan)
-    validate = validate_pod
-    post_validate = post_validate_check(validate)
-    
-    stage3 = stage_info("TRANSCODING")
-    pre_transcode = pre_transcode_check(post_validate)
-    transcode = transcode_pod
-    post_transcode = post_transcode_check(transcode)
-    
-    stage4 = stage_info("FINALIZATION")
-    final = finalize(post_transcode)
+    pre_scan >> scan_pod
+    post_scan = post_scan_check(scan_pod.output)
 
-    # Define dependencies
-    stage1 >> pre_scan >> scan >> post_scan
-    stage2 >> pre_validate >> validate >> post_validate
-    stage3 >> pre_transcode >> transcode >> post_transcode
-    stage4 >> final
+    pre_validate = pre_validate_check(post_scan)
+    pre_validate >> validate_pod
+    post_validate = post_validate_check(validate_pod.output)
+
+    pre_transcode = pre_transcode_check(post_validate)
+    pre_transcode >> transcode_pod
+    post_transcode = post_transcode_check(transcode_pod.output)
+
+    final = finalize(post_transcode)
+    verify_provenance(final)
+
 
 ingest_pipeline_v2()

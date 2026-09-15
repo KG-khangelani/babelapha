@@ -75,7 +75,8 @@ echo ""
 echo "Creating notification rule..."
 
 # Create notification using pachctl
-# Note: Pachyderm v2.x uses 'notification' command
+# This compatibility path is available only in distributions that expose the
+# non-standard `notification` command. WEBHOOK_SETUP.md documents the fallback.
 if pachctl notification create --overwrite \
     --name "${NOTIFICATION_NAME}" \
     --repo "${REPO_NAME}" \

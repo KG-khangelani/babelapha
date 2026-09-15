@@ -8,6 +8,8 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from webhook_payload import build_dag_conf, dag_run_id
+
 
 AIRFLOW_API_URL = os.environ.get("AIRFLOW_API_URL", "http://airflow-webserver:8080/api/v2")
 AIRFLOW_AUTH_URL = os.environ.get("AIRFLOW_AUTH_URL", "http://airflow-webserver:8080/auth/token")
@@ -15,6 +17,12 @@ AIRFLOW_API_USERNAME = os.environ.get("AIRFLOW_API_USERNAME", "admin")
 AIRFLOW_API_PASSWORD = os.environ.get("AIRFLOW_API_PASSWORD", "admin123")
 AIRFLOW_DAG_ID = os.environ.get("AIRFLOW_DAG_ID", "ingest_pipeline_local")
 WEBHOOK_PORT = int(os.environ.get("WEBHOOK_PORT", "8000"))
+
+
+class AirflowAPIError(RuntimeError):
+    def __init__(self, status: int, body: str):
+        super().__init__(f"Airflow returned {status}: {body}")
+        self.status = status
 
 
 def post_json(url, payload, headers=None):
@@ -32,22 +40,12 @@ def post_json(url, payload, headers=None):
             return json.loads(body) if body else {}
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Airflow returned {error.code}: {body}") from error
-
-
-def build_dag_conf(payload):
-    if payload.get("id") and payload.get("filename"):
-        return {"id": str(payload["id"]), "filename": str(payload["filename"])}
-
-    path = str(payload.get("path", "")).strip("/")
-    path_parts = path.split("/")
-    if len(path_parts) >= 3 and path_parts[0] == "incoming":
-        return {"id": path_parts[-2], "filename": path_parts[-1]}
-
-    raise ValueError("Webhook payload needs id and filename, or an incoming/<id>/<filename> path")
+        raise AirflowAPIError(error.code, body) from error
 
 
 def trigger_dag(payload):
+    conf = build_dag_conf(payload)
+    requested_run_id = dag_run_id(conf)
     auth = post_json(
         AIRFLOW_AUTH_URL,
         {"username": AIRFLOW_API_USERNAME, "password": AIRFLOW_API_PASSWORD},
@@ -57,11 +55,20 @@ def trigger_dag(payload):
         raise RuntimeError("Airflow token response did not include access_token")
 
     dag_url = f"{AIRFLOW_API_URL.rstrip('/')}/dags/{urllib.parse.quote(AIRFLOW_DAG_ID, safe='')}/dagRuns"
-    return post_json(
-        dag_url,
-        {"conf": build_dag_conf(payload), "logical_date": datetime.now(timezone.utc).isoformat()},
-        {"Authorization": f"Bearer {access_token}"},
-    )
+    try:
+        return post_json(
+            dag_url,
+            {
+                "dag_run_id": requested_run_id,
+                "conf": conf,
+                "logical_date": datetime.now(timezone.utc).isoformat(),
+            },
+            {"Authorization": f"Bearer {access_token}"},
+        )
+    except AirflowAPIError as error:
+        if error.status == 409:
+            return {"dag_run_id": requested_run_id, "duplicate": True}
+        raise
 
 
 class WebhookHandler(BaseHTTPRequestHandler):

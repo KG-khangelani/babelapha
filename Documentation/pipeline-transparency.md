@@ -50,13 +50,18 @@ for compatibility. They are not the provenance source of truth.
 
 Successful, failed, and retrying attempts use different immutable keys. A
 retry therefore preserves the failed attempt instead of overwriting it. The
-Airflow callbacks never overwrite a non-identical existing record. Both the
-local and production DAGs end with a `verify_provenance` task; a successful
+Airflow callbacks never overwrite a non-identical existing record. Every
+shipped ingestion DAG ends with a `verify_provenance` task; a successful
 pipeline cannot pass that gate when any required upstream success manifest is
 missing, malformed, stored under the wrong identity key, or lacks its exact
 canonical OpenLineage outbox event. The gate validates manifest contents and
 proves the queued execution and artifact facts match before declaring the run's
 provenance complete.
+
+`ingest_pipeline_v2` is an experimental Kubernetes boundary diagnostic, not a
+media-processing path. It still emits and gates the same immutable evidence,
+but its decisions say `diagnostic_only`, its artifact outputs are empty, and it
+never claims malware, format, or rendition results that it did not measure.
 
 The write uses the S3 `If-None-Match: *` precondition, so append-only behavior
 is atomic even when duplicate callbacks race. Re-emitting identical bytes is
@@ -80,6 +85,7 @@ For production, set these variables to digest-pinned references:
 BABELAPHA_SCAN_IMAGE=registry.example/clamav@sha256:<64 hex>
 BABELAPHA_VALIDATE_IMAGE=registry.example/validate@sha256:<64 hex>
 BABELAPHA_TRANSCODE_IMAGE=registry.example/transcode@sha256:<64 hex>
+BABELAPHA_DIAGNOSTIC_IMAGE=registry.example/python@sha256:<64 hex>
 ```
 
 For local Airflow, inject the result of `docker image inspect` as
@@ -117,6 +123,11 @@ non-secret values in the Airflow deployment configuration:
 The sync job refuses a missing, short, or symbolic `BUILD_VCS_NUMBER`. Container
 references without a digest remain usable, but their manifests are explicitly
 marked `CONFIGURED_REF_ONLY` rather than exact.
+
+The Pachyderm webhook contract also fails closed when a commit ID is missing.
+It copies that exact ID into `dag_run.conf.pachyderm_commit` and derives a stable
+run ID from the commit plus object identity, so a redelivered event resolves to
+the same Airflow run instead of creating duplicate lineage.
 
 ## OpenLineage and Marquez
 

@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
       - name: webhook
-        image: python:3.11.16-slim-bookworm
+        image: python@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
@@ -94,19 +94,3 @@ spec:
         configMap:
           name: webhook-listener-code
           defaultMode: 0555
-
----
-# ConfigMap to store the webhook listener Python code
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: webhook-listener-code
-  namespace: airflow
-data:
-  webhook_listener.py: |
-    #!/usr/bin/env python3
-    """
-    Webhook listener for Pachyderm file upload events.
-    (content from webhook_listener.py)
-    """
-    # [Full Python code will be embedded here during deployment]

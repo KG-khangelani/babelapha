@@ -141,10 +141,11 @@ Alternative event-driven path (closer to production):
 ```bash
 curl -X POST http://localhost:8000/webhook/pachyderm \
   -H "Content-Type: application/json" \
-  -d '{"action":"put_file","path":"/incoming/sample-001/sample.mp4"}'
+  -d '{"action":"put_file","path":"/incoming/sample-001/sample.mp4","commit":{"id":"local-demo-commit"}}'
 ```
 
-This posts directly to `webhook_listener_stdlib` and queues an `ingest_pipeline_local` DAG run.
+This posts to the Airflow 3 webhook adapter and queues one deterministic
+`ingest_pipeline_local` run for that exact Pachyderm commit and object.
 
 Notes:
 
@@ -174,13 +175,13 @@ This project aims to:
 
 - **Airflow DAGs**:
   - `pipelines/airflow/dags/ingest_pipeline.py` (production/Kubernetes mode).
-  - `pipelines/airflow/dags/ingest_pipeline_v2.py` (experimental refactor).
+  - `pipelines/airflow/dags/ingest_pipeline_v2.py` (experimental, provenance-gated Kubernetes boundary diagnostics; no media processing).
   - `pipelines/airflow/dags/ingest_pipeline_local.py` (local Docker/MinIO mode for development).
 - **Pachyderm Pipelines**: `pipelines/pachyderm/transcription-pipeline.yaml` versions cleaned transcripts.
 
 ## Pipeline Improvement Opportunities
 
-1. Replace duplicated pipeline implementations (`ingest_pipeline.py`, `ingest_pipeline_v2.py`, `ingest_pipeline_local.py`) with one source of truth plus execution mode toggles.
+1. Replace duplicated production/local pipeline implementations with one source of truth plus execution mode toggles, then retire the separate `ingest_pipeline_v2` diagnostic when equivalent stage-isolation tests exist.
 2. Move hardcoded MinIO defaults into a single config source and fail fast when production secrets are missing.
 3. Implement dead-letter handling for failed transcoding/validation runs.
 4. Add alerting + metrics on stage latency and error counts (especially for transcoding and uploads).

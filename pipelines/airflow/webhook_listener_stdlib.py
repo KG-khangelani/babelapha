@@ -7,14 +7,15 @@ Listens for PUT_FILE events from Pachyderm and triggers ingest_pipeline DAG.
 """
 
 import os
-import sys
 import json
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from datetime import datetime
 import threading
+
+from webhook_payload import build_dag_conf, dag_run_id
 
 # Configure logging
 logging.basicConfig(
@@ -32,26 +33,6 @@ AIRFLOW_DAG_ID = os.environ.get("AIRFLOW_DAG_ID", "ingest_pipeline")
 WEBHOOK_PORT = int(os.environ.get("WEBHOOK_PORT", 8000))
 PACH_INCOMING_PATH = "/incoming"
 
-
-def extract_file_metadata(path: str):
-    """
-    Extract object ID and filename from Pachyderm file path.
-    Expected format: /incoming/<id>/<filename>
-    """
-    parts = path.strip("/").split("/")
-    
-    if len(parts) < 3 or parts[0] != "incoming":
-        return None
-    
-    obj_id = parts[1]
-    filename = "/".join(parts[2:])
-    
-    if not obj_id or not filename:
-        return None
-    
-    return {"id": obj_id, "filename": filename}
-
-
 def trigger_airflow_dag(metadata):
     """
     Trigger the ingest_pipeline DAG in Airflow with the given metadata.
@@ -60,6 +41,7 @@ def trigger_airflow_dag(metadata):
         dag_run_url = f"{AIRFLOW_API_URL}/dags/{AIRFLOW_DAG_ID}/dagRuns"
         
         payload = {
+            "dag_run_id": dag_run_id(metadata),
             "conf": metadata,
             "note": f"Auto-triggered by Pachyderm webhook for {metadata.get('filename')}"
         }
@@ -87,6 +69,12 @@ def trigger_airflow_dag(metadata):
                 logger.error(f"✗ Failed to trigger DAG: status={status_code}")
                 return False
     
+    except HTTPError as e:
+        if e.code == 409:
+            logger.info("DAG run already exists for this Pachyderm commit and object")
+            return True
+        logger.error(f"Airflow API returned HTTP {e.code}")
+        return False
     except URLError as e:
         logger.error(f"Request to Airflow API failed: {e}")
         return False
@@ -172,14 +160,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 }).encode('utf-8'))
                 return
             
-            # Extract metadata
-            metadata = extract_file_metadata(path)
-            if not metadata:
-                logger.error(f"Failed to extract metadata from path: {path}")
+            # Preserve the exact Pachyderm commit in the Airflow run config.
+            try:
+                metadata = build_dag_conf(event)
+            except ValueError as error:
+                logger.error(f"Invalid lineage identity: {error}")
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": "invalid path format"}).encode('utf-8'))
+                self.wfile.write(json.dumps({"error": str(error)}).encode('utf-8'))
                 return
             
             logger.info(f"Extracted metadata: {metadata}")

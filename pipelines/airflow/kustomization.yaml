@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: airflow
+resources:
+  - webhook-deployment.yaml
+configMapGenerator:
+  - name: webhook-listener-code
+    files:
+      - webhook_listener_stdlib.py
+      - webhook_payload.py
+generatorOptions:
+  disableNameSuffixHash: true

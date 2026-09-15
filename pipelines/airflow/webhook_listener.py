@@ -10,13 +10,14 @@ Usage:
 """
 
 import os
-import sys
 import json
 import logging
 from flask import Flask, request, jsonify
 from datetime import datetime
 import requests
-from typing import Dict, Any, Optional
+from typing import Dict
+
+from webhook_payload import build_dag_conf, dag_run_id
 
 # Configure logging
 logging.basicConfig(
@@ -38,33 +39,6 @@ PACH_INCOMING_PATH = "/incoming"  # Pachyderm path where uploads arrive
 PACH_REPO = "media"
 PACH_BRANCH = "master"
 
-
-def extract_file_metadata(path: str) -> Optional[Dict[str, str]]:
-    """
-    Extract object ID and filename from Pachyderm file path.
-    
-    Expected path format: /incoming/<id>/<filename>
-    Returns: {"id": "...", "filename": "..."}
-    """
-    parts = path.strip("/").split("/")
-    
-    if len(parts) < 3 or parts[0] != "incoming":
-        logger.warning(f"Unexpected path format: {path}")
-        return None
-    
-    obj_id = parts[1]
-    filename = "/".join(parts[2:])  # Handle nested filenames
-    
-    if not obj_id or not filename:
-        logger.warning(f"Invalid path components: id={obj_id}, filename={filename}")
-        return None
-    
-    return {
-        "id": obj_id,
-        "filename": filename
-    }
-
-
 def trigger_airflow_dag(metadata: Dict[str, str]) -> bool:
     """
     Trigger the ingest_pipeline DAG in Airflow with the given metadata.
@@ -79,6 +53,7 @@ def trigger_airflow_dag(metadata: Dict[str, str]) -> bool:
         dag_run_url = f"{AIRFLOW_API_URL}/dags/{AIRFLOW_DAG_ID}/dagRuns"
         
         payload = {
+            "dag_run_id": dag_run_id(metadata),
             "conf": metadata,
             "note": f"Auto-triggered by Pachyderm webhook for {metadata.get('filename')}"
         }
@@ -96,6 +71,9 @@ def trigger_airflow_dag(metadata: Dict[str, str]) -> bool:
             run_data = response.json()
             run_id = run_data.get('dag_run_id', 'unknown')
             logger.info(f"✓ DAG triggered successfully: run_id={run_id}")
+            return True
+        elif response.status_code == 409:
+            logger.info("DAG run already exists for this Pachyderm commit and object")
             return True
         else:
             logger.error(
@@ -158,11 +136,12 @@ def pachyderm_webhook():
             logger.info(f"Ignoring file outside {PACH_INCOMING_PATH}: {path}")
             return jsonify({"status": "ignored", "reason": f"path={path}"}), 200
         
-        # Extract metadata
-        metadata = extract_file_metadata(path)
-        if not metadata:
-            logger.error(f"Failed to extract metadata from path: {path}")
-            return jsonify({"error": "invalid path format"}), 400
+        # Preserve the exact Pachyderm commit in the Airflow run config.
+        try:
+            metadata = build_dag_conf(event)
+        except ValueError as error:
+            logger.error(f"Invalid lineage identity: {error}")
+            return jsonify({"error": str(error)}), 400
         
         logger.info(f"Extracted metadata: {metadata}")
         

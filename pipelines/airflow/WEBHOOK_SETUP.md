@@ -51,6 +51,7 @@ This document describes how to automatically trigger the `ingest_pipeline` DAG w
 - **Config Required**: 
   - `id`: Object identifier (e.g., "test-001")
   - `filename`: Media file name (e.g., "sample.mp4")
+  - `pachyderm_commit`: Exact source commit ID (the webhook rejects events that omit it)
 
 ## Installation
 
@@ -59,7 +60,7 @@ This document describes how to automatically trigger the `ingest_pipeline` DAG w
 Deploy the webhook listener in the Airflow namespace:
 
 ```bash
-kubectl apply -f pipelines/airflow/webhook-deployment.yaml
+kubectl apply -k pipelines/airflow
 ```
 
 Verify deployment:
@@ -77,16 +78,29 @@ curl http://localhost:8000/health
 curl http://localhost:8000/webhook/pachyderm
 ```
 
-### Step 2: Configure Pachyderm Notification
+### Step 2: Connect a Pachyderm Commit Event Source
 
-Run the setup script from the control node:
+The listener contract is stable, but the mechanism that produces HTTP events
+is Pachyderm-version-specific. First check whether your installed `pachctl`
+provides the notification commands used by the compatibility helper:
+
+```bash
+pachctl notification --help
+```
+
+If that command is unavailable, use the event bridge supported by your
+Pachyderm deployment and make it POST the documented payload below. Do not
+construct an event from only a file path: the exact commit ID is mandatory.
+
+When `pachctl notification` is available, run the setup script from the control
+node:
 
 ```bash
 cd /path/to/babelapha
 bash pipelines/airflow/setup-pachyderm-notification.sh
 ```
 
-**Or manually configure** using pachctl:
+**Or manually configure** that supported command:
 
 ```bash
 pachctl notification create \
@@ -187,9 +201,11 @@ The webhook expects Pachyderm commit notifications in the following format:
 The webhook listener:
 1. Validates the action is `put_file`
 2. Extracts path: `/incoming/<id>/<filename>`
-3. Parses into metadata: `{"id": "...", "filename": "..."}`
-4. POSTs to Airflow API: `/api/v1/dags/ingest_pipeline/dagRuns`
-5. Logs result and returns HTTP 202 (Accepted)
+3. Requires the exact commit ID and parses metadata as `{"id": "...", "filename": "...", "pachyderm_commit": "..."}`
+4. Derives a deterministic Airflow run ID from the commit and object
+5. POSTs to Airflow API: `/api/v1/dags/ingest_pipeline/dagRuns`
+6. Treats a duplicate-run response as an idempotent redelivery
+7. Logs result and returns HTTP 202 (Accepted)
 
 ## Troubleshooting
 
@@ -310,5 +326,5 @@ To remove the integration:
 pachctl notification delete --repo media ingest-pipeline-trigger
 
 # Remove Airflow webhook deployment
-kubectl delete -f pipelines/airflow/webhook-deployment.yaml
+kubectl delete -k pipelines/airflow
 ```

@@ -115,6 +115,19 @@ class ProvenanceContractTests(unittest.TestCase):
         with self.assertRaises(provenance.ManifestValidationError):
             provenance.validate_manifest(false_identity)
 
+        mismatched_commit = self.sample_manifest(
+            inputs=[
+                provenance.artifact(
+                    "s3://pachyderm/incoming/interview-042/interview.mp4",
+                    pachyderm_commit="artifact-commit",
+                )
+            ],
+            parameters={"pachyderm_commit": "artifact-commit"},
+        )
+        mismatched_commit["execution"]["parameters"]["pachyderm_commit"] = "run-commit"
+        with self.assertRaisesRegex(provenance.ManifestValidationError, "Pachyderm commit differs"):
+            provenance.validate_manifest(mismatched_commit)
+
     def test_kubernetes_task_never_inherits_the_airflow_runtime_digest(self):
         class TaskInstance:
             task_id = "run_virus_scan"
@@ -306,7 +319,11 @@ class ProvenanceContractTests(unittest.TestCase):
             "task": SimpleNamespace(task_id="virus_scan", dag_id="ingest_pipeline", image="scan@sha256:" + "d" * 64),
             "dag_run": SimpleNamespace(
                 run_id="manual__failure",
-                conf={"id": "interview-042", "filename": "interview.mp4"},
+                conf={
+                    "id": "interview-042",
+                    "filename": "interview.mp4",
+                    "pachyderm_commit": "pachyderm-commit-42",
+                },
             ),
             "exception": RuntimeError("malware detected"),
         }
@@ -318,6 +335,61 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertEqual(record["inputs"], [source])
         self.assertEqual(record["outputs"], [])
         self.assertEqual(record["decision"]["reason_code"], "TASK_FAILED")
+
+    def test_early_failure_preserves_pachyderm_commit_in_parameters_and_fallback_artifact(self):
+        upstream = {
+            "object_id": "interview-042",
+            "filename": "interview.mp4",
+            "s3_bucket": "pachyderm",
+            "s3_input_key": "incoming/interview-042/interview.mp4",
+        }
+
+        class TaskInstance:
+            task_id = "download_from_minio"
+            dag_id = "ingest_pipeline_local"
+            try_number = 1
+            start_date = datetime(2026, 9, 15, tzinfo=timezone.utc)
+            end_date = datetime(2026, 9, 15, 0, 0, 1, tzinfo=timezone.utc)
+            log_url = "http://airflow.example/log"
+
+            @staticmethod
+            def xcom_pull(task_ids):
+                return upstream if task_ids == "validate_inputs" else None
+
+        context = {
+            "task_instance": TaskInstance(),
+            "task": SimpleNamespace(task_id="download_from_minio", dag_id="ingest_pipeline_local"),
+            "dag_run": SimpleNamespace(
+                run_id="manual__early-failure",
+                conf={
+                    "id": "interview-042",
+                    "filename": "interview.mp4",
+                    "pachyderm_commit": "pachyderm-commit-early",
+                },
+            ),
+            "exception": FileNotFoundError("source missing"),
+        }
+        with mock.patch.dict("os.environ", {"BABELAPHA_GIT_SHA": "e" * 40}, clear=False):
+            record = provenance.build_airflow_manifest(context, "FAILED")
+
+        self.assertEqual(
+            record["execution"]["parameters"]["pachyderm_commit"],
+            "pachyderm-commit-early",
+        )
+        self.assertEqual(record["inputs"][0]["integrity"], "UNVERIFIED")
+        self.assertEqual(
+            record["inputs"][0]["version"]["pachyderm_commit"],
+            "pachyderm-commit-early",
+        )
+        self.assertEqual(record["outputs"], [])
+
+        upstream["pachyderm_commit"] = "different-commit"
+        with mock.patch.dict("os.environ", {"BABELAPHA_GIT_SHA": "e" * 40}, clear=False):
+            with self.assertRaisesRegex(
+                provenance.ManifestValidationError,
+                "Task payload Pachyderm commit differs",
+            ):
+                provenance.build_airflow_manifest(context, "FAILED")
 
     def test_openlineage_event_reuses_manifest_identity_and_artifacts(self):
         item = provenance.artifact(
