@@ -18,7 +18,7 @@ from inspect_provenance import (
 )
 
 
-API_VERSION = "1.5.1"
+API_VERSION = "1.6.0"
 API_PORT = int(os.environ.get("PROVENANCE_API_PORT", "8010"))
 PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
     "S3_BUCKET", "pachyderm"
@@ -97,6 +97,7 @@ def _unavailable_media_summary(*, state: str, code: str, message: str) -> dict:
         "run_identity_completeness": None,
         "artifact_node_count": unavailable,
         "openlineage_state_counts": {},
+        "evidence_set_sha256": None,
         "error": {"code": code, "message": message},
     }
 
@@ -148,6 +149,7 @@ def _media_evidence_summary(object_id: str) -> dict:
         ),
         "artifact_node_count": sum(len(run["artifact_evidence"]) for run in runs),
         "openlineage_state_counts": view["openlineage_delivery"]["state_counts"],
+        "evidence_set_sha256": view["evidence_set"]["sha256"],
         "error": None,
     }
 

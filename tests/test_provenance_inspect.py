@@ -182,6 +182,7 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "code=/opt/airflow/dags/ingest_pipeline.py sha256=" + "c" * 64,
             "bundle_sha256=" + "e" * 64,
             "container=registry/validate digest=sha256:" + "d" * 64,
+            "Evidence set: sha256=",
             "manifest="
             + records[0]["links"]["manifest"]
             + " sha256="
@@ -345,6 +346,7 @@ class ProvenanceInspectorTests(unittest.TestCase):
                                 "outbox_uri": None,
                                 "event_sha256": None,
                                 "receipt_uri": None,
+                                "receipt_sha256": None,
                                 "endpoint": None,
                                 "http_status": None,
                                 "delivered_at": None,
@@ -605,6 +607,7 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "outbox_uri": "s3://pachyderm/openlineage/outbox/event.json",
             "event_sha256": "f" * 64,
             "receipt_uri": "s3://pachyderm/openlineage/delivered/event.json",
+            "receipt_sha256": "e" * 64,
             "endpoint": "http://marquez:5000/api/v1/lineage",
             "http_status": 201,
             "delivered_at": "2026-09-15T08:00:01Z",
@@ -687,7 +690,34 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "DELIVERED",
         )
         self.assertEqual(evidence["states"][pending_record["manifest_id"]]["state"], "PENDING")
+        receipt_key = provenance.openlineage_event_key(delivered_event, "delivered")
+        self.assertEqual(
+            evidence["states"][delivered_record["manifest_id"]]["receipt_sha256"],
+            hashlib.sha256(client.objects[receipt_key]).hexdigest(),
+        )
         self.assertEqual(view["openlineage_delivery"]["state_counts"], {"DELIVERED": 1, "PENDING": 1})
+        self.assertEqual(view["evidence_set"]["manifest_count"], 2)
+        self.assertEqual(view["evidence_set"]["openlineage_event_count"], 2)
+        self.assertEqual(view["evidence_set"]["delivery_receipt_count"], 1)
+        reordered = inspector.build_view(
+            "interview-042",
+            [pending_record, delivered_record],
+            evidence,
+        )
+        self.assertEqual(reordered["evidence_set"], view["evidence_set"])
+        changed_delivery = copy.deepcopy(evidence)
+        changed_delivery["states"][delivered_record["manifest_id"]][
+            "delivered_at"
+        ] = "2026-09-15T08:00:02Z"
+        changed = inspector.build_view(
+            "interview-042",
+            [delivered_record, pending_record],
+            changed_delivery,
+        )
+        self.assertNotEqual(
+            changed["evidence_set"]["sha256"],
+            view["evidence_set"]["sha256"],
+        )
         stages = {stage["task_id"]: stage for stage in view["runs"][0]["stage_evidence"]}
         self.assertEqual(stages["validate_media"]["attempts"][0]["openlineage"]["state"], "DELIVERED")
         self.assertEqual(stages["transcode"]["attempts"][0]["openlineage"]["state"], "PENDING")
@@ -715,6 +745,36 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertEqual(state["state"], "INTEGRITY_ERROR")
         self.assertEqual(state["integrity"], "FAILED")
         self.assertIn("facts differ from the canonical manifest", state["error"])
+
+    def test_media_view_rejects_noncanonical_delivery_receipt_bytes(self):
+        client = MemoryS3()
+        record = sample_record()
+        event = provenance.build_openlineage_event(record)
+        outbox_uri = provenance.persist_openlineage_event(event, client=client)
+        provenance.persist_openlineage_receipt(
+            event,
+            outbox_uri=outbox_uri,
+            openlineage_target="http://marquez:5000/api/v1/lineage",
+            http_status=201,
+            client=client,
+        )
+        receipt_key = provenance.openlineage_event_key(event, "delivered")
+        receipt = json.loads(client.objects[receipt_key])
+        client.objects[receipt_key] = json.dumps(receipt).encode()
+
+        with mock.patch.object(inspector, "_s3_client", return_value=client):
+            evidence = inspector.read_openlineage_delivery_evidence(
+                object_id="interview-042",
+                records=[record],
+            )
+
+        state = evidence["states"][record["manifest_id"]]
+        self.assertEqual(state["state"], "INTEGRITY_ERROR")
+        self.assertEqual(
+            state["receipt_sha256"],
+            hashlib.sha256(client.objects[receipt_key]).hexdigest(),
+        )
+        self.assertIn("receipt bytes are not canonical", state["error"])
 
     def test_media_view_distinguishes_missing_outbox_and_orphaned_receipt(self):
         record = sample_record()
@@ -748,6 +808,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertEqual(evidence["states"][record["manifest_id"]]["state"], "ORPHANED_RECEIPT")
         self.assertEqual(evidence["errors"][0]["state"], "ORPHANED_RECEIPT")
         orphaned_view = inspector.build_view("interview-042", [record], evidence)
+        self.assertEqual(orphaned_view["evidence_set"]["openlineage_event_count"], 0)
+        self.assertEqual(orphaned_view["evidence_set"]["delivery_receipt_count"], 1)
         self.assertEqual(inspector.delivery_exit_code(missing_view), 3)
         self.assertEqual(inspector.delivery_exit_code(orphaned_view), 3)
 
@@ -759,6 +821,7 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "outbox_uri": "s3://pachyderm/openlineage/outbox/pending.json",
             "event_sha256": "a" * 64,
             "receipt_uri": None,
+            "receipt_sha256": None,
             "endpoint": None,
             "http_status": None,
             "delivered_at": None,

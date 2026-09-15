@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.5.1",
-    "description": "Read-only discovery and validated views over storage-bound canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.6.0",
+    "description": "Read-only discovery and deterministic evidence-set identities over storage-bound canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -167,7 +167,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.5.1"},
+          "api_version": {"const": "1.6.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -177,7 +177,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.5.1"},
+          "api_version": {"const": "1.6.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -194,7 +194,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.5.1"},
+          "api_version": {"const": "1.6.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -225,7 +225,7 @@
       "CatalogEvidenceSummary": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["read_state", "object_filenames", "run_count", "record_count", "latest_recorded_at", "statuses_observed", "run_identity_completeness", "artifact_node_count", "openlineage_state_counts", "error"],
+        "required": ["read_state", "object_filenames", "run_count", "record_count", "latest_recorded_at", "statuses_observed", "run_identity_completeness", "artifact_node_count", "openlineage_state_counts", "evidence_set_sha256", "error"],
         "properties": {
           "read_state": {"enum": ["AVAILABLE", "EVIDENCE_NOT_FOUND", "INTEGRITY_FAILED"]},
           "object_filenames": {
@@ -247,6 +247,7 @@
             "type": "object",
             "additionalProperties": {"type": "integer", "minimum": 1}
           },
+          "evidence_set_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
           "error": {
             "oneOf": [
               {"type": "null"},
@@ -269,18 +270,19 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.5.1"},
+          "api_version": {"const": "1.6.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
         }
       },
       "ProvenanceView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["object_id", "run_count", "record_count", "openlineage_delivery", "runs"],
+        "required": ["object_id", "run_count", "record_count", "evidence_set", "openlineage_delivery", "runs"],
         "properties": {
           "object_id": {"type": "string", "minLength": 1},
           "run_count": {"type": "integer", "minimum": 1},
           "record_count": {"type": "integer", "minimum": 1},
+          "evidence_set": {"$ref": "#/components/schemas/EvidenceSetIdentity"},
           "openlineage_delivery": {"$ref": "#/components/schemas/OpenLineageDelivery"},
           "runs": {
             "type": "array",
@@ -322,6 +324,20 @@
               "$ref": "https://raw.githubusercontent.com/KG-khangelani/babelapha/089e23c53303b0c4b5298b12fdda11f646e3ff2b/contracts/provenance-manifest-v1.schema.json"
             }
           }
+        }
+      },
+      "EvidenceSetIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema_version", "canonicalization", "algorithm", "sha256", "manifest_count", "openlineage_event_count", "delivery_receipt_count"],
+        "properties": {
+          "schema_version": {"const": "1.0.0"},
+          "canonicalization": {"const": "SORTED_COMPACT_JSON_V1"},
+          "algorithm": {"const": "SHA-256"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "manifest_count": {"type": "integer", "minimum": 1},
+          "openlineage_event_count": {"type": "integer", "minimum": 0},
+          "delivery_receipt_count": {"type": "integer", "minimum": 0}
         }
       },
       "RunIdentity": {
@@ -518,13 +534,14 @@
       "DeliveryState": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["state", "integrity", "outbox_uri", "event_sha256", "receipt_uri", "endpoint", "http_status", "delivered_at", "error"],
+        "required": ["state", "integrity", "outbox_uri", "event_sha256", "receipt_uri", "receipt_sha256", "endpoint", "http_status", "delivered_at", "error"],
         "properties": {
           "state": {"enum": ["NOT_CHECKED", "PENDING", "DELIVERED", "MISSING_OUTBOX", "ORPHANED_RECEIPT", "INTEGRITY_ERROR"]},
           "integrity": {"enum": ["NOT_CHECKED", "VERIFIED", "FAILED"]},
           "outbox_uri": {"type": ["string", "null"]},
           "event_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
           "receipt_uri": {"type": ["string", "null"]},
+          "receipt_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
           "endpoint": {"type": ["string", "null"], "format": "uri"},
           "http_status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
           "delivered_at": {"type": ["string", "null"], "format": "date-time"},

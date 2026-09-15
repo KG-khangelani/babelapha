@@ -172,7 +172,10 @@ s3://pachyderm/output/<id>/dash/*
    `artifact_evidence` nodes group every input/output occurrence by URI and
    reject competing hashes or storage versions. Every recorded stage also
    exposes the exact manifest URI and SHA-256 together with the complete queued
-   OpenLineage and delivery-receipt evidence. Reads reject a manifest whose
+   OpenLineage and delivery-receipt evidence, including hashes of both immutable
+   objects. An `evidence_set` SHA-256 identifies the exact collection of
+   manifests, lineage events, receipts, and integrity findings returned by the
+   selected view. Reads reject a manifest whose
    canonical bytes, declared identity, or self-link does not match its immutable
    S3 object key.
 

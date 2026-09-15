@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.5.1`) exposes the same
+The versioned read-only HTTP boundary (currently `1.6.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -249,6 +249,16 @@ perform an opaque secondary join to locate the underlying evidence.
 Manifest IDs are also unique across every selected evidence set. Reusing one
 ID for two task attempts is an integrity conflict because that ID is the join
 key between a manifest, its queued OpenLineage event, and its delivery receipt.
+
+Each successful delivery receipt must use the canonical stored serialization
+and receives its own SHA-256 in the read model. The top-level `evidence_set`
+then fingerprints the complete selected snapshot: sorted manifest identities
+and hashes, matched and unmatched lineage states, receipt hashes, and integrity
+errors. Its `SORTED_COMPACT_JSON_V1` material uses UTF-8 JSON with sorted keys,
+no insignificant whitespace, and the published evidence-set schema version.
+The same fingerprint is included in an opt-in catalog summary, giving the
+future explorer a stable citation and change-detection key without treating the
+mutable HTTP response as a new source of truth.
 
 The API runs in its own non-root image rather than inheriting the Airflow
 runtime. Its Python base is digest-pinned, every Python dependency is version

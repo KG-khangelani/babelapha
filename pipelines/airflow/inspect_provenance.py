@@ -15,6 +15,7 @@ import urllib.parse
 
 DAGS_DIR = Path(__file__).resolve().parent / "dags"
 sys.path.insert(0, str(DAGS_DIR))
+EVIDENCE_SET_SCHEMA_VERSION = "1.0.0"
 
 from provenance import (  # noqa: E402
     PIPELINE_TASK_CONTRACTS,
@@ -201,6 +202,7 @@ def read_openlineage_delivery_evidence(
         manifest_id = None
         event_sha256 = None
         receipt_key = None
+        receipt_sha256 = None
         try:
             event_body, event = _read_json(client, bucket=bucket, key=outbox_key)
             if canonical_json_bytes(event) != event_body:
@@ -224,18 +226,23 @@ def read_openlineage_delivery_evidence(
                 "outbox_uri": outbox_uri,
                 "event_sha256": event_sha256,
                 "receipt_uri": None,
+                "receipt_sha256": None,
                 "endpoint": None,
                 "http_status": None,
                 "delivered_at": None,
                 "error": None,
             }
             if receipt_key in receipt_keys:
-                _, receipt = _read_json(client, bucket=bucket, key=receipt_key)
+                receipt_body, receipt = _read_json(client, bucket=bucket, key=receipt_key)
+                receipt_sha256 = hashlib.sha256(receipt_body).hexdigest()
+                if canonical_json_bytes(receipt) != receipt_body:
+                    raise ValueError("delivery receipt bytes are not canonical")
                 validate_openlineage_receipt(receipt, event, outbox_uri=outbox_uri)
                 state.update(
                     {
                         "state": "DELIVERED",
                         "receipt_uri": f"s3://{bucket}/{receipt_key}",
+                        "receipt_sha256": receipt_sha256,
                         "endpoint": receipt["endpoint"],
                         "http_status": receipt["http_status"],
                         "delivered_at": receipt["delivered_at"],
@@ -253,6 +260,7 @@ def read_openlineage_delivery_evidence(
                     "outbox_uri": f"s3://{bucket}/{outbox_key}",
                     "event_sha256": event_sha256,
                     "receipt_uri": f"s3://{bucket}/{receipt_key}" if receipt_key in receipt_keys else None,
+                    "receipt_sha256": receipt_sha256,
                     "endpoint": None,
                     "http_status": None,
                     "delivered_at": None,
@@ -268,7 +276,9 @@ def read_openlineage_delivery_evidence(
 
     for receipt_key in sorted(receipt_keys - matched_receipts):
         try:
-            _, receipt = _read_json(client, bucket=bucket, key=receipt_key)
+            receipt_body, receipt = _read_json(client, bucket=bucket, key=receipt_key)
+            if canonical_json_bytes(receipt) != receipt_body:
+                raise ValueError("delivery receipt bytes are not canonical")
             manifest_id = receipt.get("manifest_id")
             orphan = {
                 "state": "ORPHANED_RECEIPT",
@@ -276,6 +286,7 @@ def read_openlineage_delivery_evidence(
                 "outbox_uri": receipt.get("outbox_uri"),
                 "event_sha256": receipt.get("event_sha256"),
                 "receipt_uri": f"s3://{bucket}/{receipt_key}",
+                "receipt_sha256": hashlib.sha256(receipt_body).hexdigest(),
                 "endpoint": receipt.get("endpoint"),
                 "http_status": receipt.get("http_status"),
                 "delivered_at": receipt.get("delivered_at"),
@@ -553,6 +564,76 @@ def _artifact_evidence(run_id: str, records: list[dict]) -> list[dict]:
     return evidence
 
 
+def _evidence_set_identity(
+    object_id: str,
+    runs: list[dict],
+    delivery_by_manifest_id: dict[str, dict],
+    unmatched: dict[str, dict],
+    errors: list[dict],
+) -> dict:
+    """Fingerprint the exact manifest and lineage evidence behind one view."""
+    manifests = sorted(
+        (
+            {
+                "manifest_id": record["manifest_id"],
+                "manifest_uri": record["links"]["manifest"],
+                "manifest_sha256": hashlib.sha256(
+                    canonical_json_bytes(record)
+                ).hexdigest(),
+            }
+            for run in runs
+            for record in run["records"]
+        ),
+        key=lambda item: (item["manifest_uri"], item["manifest_id"]),
+    )
+    lineage = [
+        {"manifest_id": manifest_id, **state}
+        for manifest_id, state in sorted(delivery_by_manifest_id.items())
+    ]
+    unmatched_lineage = [
+        {"manifest_id": manifest_id, **state}
+        for manifest_id, state in sorted(unmatched.items())
+    ]
+    ordered_errors = sorted(
+        errors,
+        key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+    )
+    material = {
+        "schema_version": EVIDENCE_SET_SCHEMA_VERSION,
+        "object_id": object_id,
+        "manifests": manifests,
+        "lineage": lineage,
+        "unmatched_lineage": unmatched_lineage,
+        "errors": ordered_errors,
+    }
+    encoded = json.dumps(
+        material,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    all_lineage = lineage + unmatched_lineage
+    return {
+        "schema_version": EVIDENCE_SET_SCHEMA_VERSION,
+        "canonicalization": "SORTED_COMPACT_JSON_V1",
+        "algorithm": "SHA-256",
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "manifest_count": len(manifests),
+        "openlineage_event_count": sum(
+            bool(
+                item["state"] != "ORPHANED_RECEIPT"
+                and item["outbox_uri"]
+                and item["event_sha256"]
+            )
+            for item in all_lineage
+        ),
+        "delivery_receipt_count": sum(
+            bool(item["receipt_uri"] and item["receipt_sha256"])
+            for item in all_lineage
+        ),
+    }
+
+
 def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict | None = None) -> dict:
     """Group validated records by Airflow run without inventing run state."""
     records = list(records)
@@ -574,6 +655,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                     "outbox_uri": None,
                     "event_sha256": None,
                     "receipt_uri": None,
+                    "receipt_sha256": None,
                     "endpoint": None,
                     "http_status": None,
                     "delivered_at": None,
@@ -588,6 +670,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                         "outbox_uri": None,
                         "event_sha256": None,
                         "receipt_uri": None,
+                        "receipt_sha256": None,
                         "endpoint": None,
                         "http_status": None,
                         "delivered_at": None,
@@ -696,15 +779,23 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
         for manifest_id, state in delivery_states.items()
         if manifest_id not in delivery_by_manifest_id
     }
+    errors = [] if delivery_evidence is None else delivery_evidence["errors"]
     return {
         "object_id": object_id,
         "run_count": len(runs),
         "record_count": sum(map(len, grouped.values())),
+        "evidence_set": _evidence_set_identity(
+            object_id,
+            runs,
+            delivery_by_manifest_id,
+            unmatched,
+            errors,
+        ),
         "openlineage_delivery": {
             "state_counts": state_counts,
             "by_manifest_id": delivery_by_manifest_id,
             "unmatched": unmatched,
-            "errors": [] if delivery_evidence is None else delivery_evidence["errors"],
+            "errors": errors,
         },
         "runs": runs,
     }
@@ -738,6 +829,11 @@ def render_text(view: dict) -> str:
     lines = [
         f"Object: {view['object_id']}",
         f"Runs: {view['run_count']}  Records: {view['record_count']}",
+        "Evidence set: "
+        f"sha256={view['evidence_set']['sha256']} "
+        f"manifests={view['evidence_set']['manifest_count']} "
+        f"events={view['evidence_set']['openlineage_event_count']} "
+        f"receipts={view['evidence_set']['delivery_receipt_count']}",
         "OpenLineage: "
         + ", ".join(
             f"{state}={count}"
@@ -862,7 +958,9 @@ def render_text(view: dict) -> str:
                     f"      state={delivery['state']} integrity={delivery['integrity']}",
                     f"      outbox={_value(delivery['outbox_uri'])} event_sha256={_value(delivery['event_sha256'])}",
                     "      "
-                    f"receipt={_value(delivery['receipt_uri'])} endpoint={_value(delivery['endpoint'])} "
+                    f"receipt={_value(delivery['receipt_uri'])} "
+                    f"receipt_sha256={_value(delivery['receipt_sha256'])} "
+                    f"endpoint={_value(delivery['endpoint'])} "
                     f"http={_value(delivery['http_status'])} "
                     f"delivered_at={_value(delivery['delivered_at'])}",
                 ]

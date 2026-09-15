@@ -38,6 +38,7 @@ AVAILABLE_SUMMARY = {
     "run_identity_completeness": "COMPLETE",
     "artifact_node_count": 3,
     "openlineage_state_counts": {"DELIVERED": 2},
+    "evidence_set_sha256": "9" * 64,
     "error": None,
 }
 
@@ -142,7 +143,7 @@ class ProvenanceAPITests(unittest.TestCase):
         status, payload = api.route_get("/health")
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["api_version"], "1.5.1")
+        self.assertEqual(payload["api_version"], "1.6.0")
         self.assertEqual(payload["status"], "ok")
 
     def test_catalog_is_paginated_and_adds_canonical_detail_links(self):
@@ -216,6 +217,7 @@ class ProvenanceAPITests(unittest.TestCase):
         view = {
             "run_count": 2,
             "record_count": 2,
+            "evidence_set": {"sha256": "8" * 64},
             "openlineage_delivery": {"state_counts": {"DELIVERED": 1, "PENDING": 1}},
             "runs": [
                 {
@@ -264,6 +266,7 @@ class ProvenanceAPITests(unittest.TestCase):
                 "run_identity_completeness": "PARTIAL",
                 "artifact_node_count": 3,
                 "openlineage_state_counts": {"DELIVERED": 1, "PENDING": 1},
+                "evidence_set_sha256": "8" * 64,
                 "error": None,
             },
         )
@@ -328,7 +331,7 @@ class ProvenanceAPITests(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"api_version": "1.5.1", "data": view})
+        self.assertEqual(payload, {"api_version": "1.6.0", "data": view})
         read.assert_called_once_with(
             object_id="interview/002",
             run_id="manual__run 42",
