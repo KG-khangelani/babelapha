@@ -4,6 +4,11 @@ This directory holds the TeamCity Kotlin DSL that defines CI pipelines for the
 project. The `Media Pipeline Checks` build configuration validates the Airflow
 and Pachyderm assets before we add heavier integration tests.
 
+`Build Media Pipeline Docker Images` also builds the standalone provenance API
+image with the full TeamCity VCS revision as an OCI label. The API build is
+triggered by changes to its Docker context, reader code, canonical provenance
+module, or versioned OpenAPI contract.
+
 ## Bootstrapping
 
 1. Enable Kotlin DSL in your TeamCity project.

@@ -203,6 +203,20 @@ default; local origins can be explicitly allowlisted with the comma-separated
 read boundary, not an internet security perimeter; add authentication, rate
 limiting, and deployment-specific authorization before public exposure.
 
+The API runs in its own non-root image rather than inheriting the Airflow
+runtime. Its Python base is digest-pinned, every Python dependency is version
+pinned, and CI supplies the full Git commit as the OCI image revision:
+
+```powershell
+docker build --pull `
+  --build-arg BUILD_VCS_NUMBER=$(git rev-parse HEAD) `
+  -f docker/provenance-api/Dockerfile `
+  -t babelapha-provenance-api:local .
+```
+
+A production deployment should promote the built image by registry digest,
+not by its mutable local tag.
+
 The same view joins each manifest to its immutable OpenLineage outbox event and
 delivery receipt. It reports `DELIVERED`, `PENDING`, `MISSING_OUTBOX`,
 `ORPHANED_RECEIPT`, or `INTEGRITY_ERROR`, together with the exact event SHA-256,

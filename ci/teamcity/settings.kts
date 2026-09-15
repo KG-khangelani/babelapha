@@ -111,7 +111,8 @@ object AirflowGitSync : BuildType({
         vcs {
             triggerRules = """
                 +:pipelines/airflow/dags/**
-                +:pipelines/airflow/inspect_provenance.py
+                +:pipelines/airflow/*.py
+                +:pipelines/airflow/*.yaml
                 +:contracts/**
                 +:tests/**
                 +:docker/airflow-gitsync/**
@@ -130,7 +131,7 @@ object AirflowGitSync : BuildType({
 
 object MediaPipelineDockerImages : BuildType({
     name = "Build Media Pipeline Docker Images"
-    description = "Build and push ClamAV, Validate, and Transcode container images for media processing pipeline"
+    description = "Build media-processing containers and the read-only provenance API image"
 
     vcs {
         root(HttpsGithubComKgKhangelaniBabelaphaRefsHeadsMain3)
@@ -174,6 +175,18 @@ object MediaPipelineDockerImages : BuildType({
             }
         }
         dockerCommand {
+            name = "Build Provenance Read API Image"
+            id = "Build_Provenance_API_Image"
+            commandType = build {
+                source = file {
+                    path = "docker/provenance-api/Dockerfile"
+                }
+                contextDir = "."
+                namesAndTags = "babelapha-provenance-api:%build.number%"
+                commandArgs = "--pull --build-arg BUILD_VCS_NUMBER=%build.vcs.number%"
+            }
+        }
+        dockerCommand {
             name = "Make Images Available to Kubernetes"
             id = "Export_Images_For_K8s"
             commandType = other {
@@ -206,6 +219,11 @@ object MediaPipelineDockerImages : BuildType({
                 +:docker/validate/**
                 +:docker/transcode/**
                 +:docker/utils/**
+                +:docker/provenance-api/**
+                +:pipelines/airflow/provenance_api.py
+                +:pipelines/airflow/inspect_provenance.py
+                +:pipelines/airflow/dags/provenance.py
+                +:contracts/provenance-read-api-v1.openapi.json
             """.trimIndent()
             branchFilter = "+:refs/heads/main"
             perCheckinTriggering = true

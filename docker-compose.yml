@@ -214,24 +214,24 @@ services:
     command: ["--help"]
 
   provenance-api:
-    <<: *airflow_base
+    image: babelapha-provenance-api-local
+    build:
+      context: .
+      dockerfile: docker/provenance-api/Dockerfile
+      args:
+        BUILD_VCS_NUMBER: ${BABELAPHA_GIT_SHA:-unknown}
     container_name: babelapha-provenance-api
     depends_on:
       minio:
         condition: service_healthy
     environment:
       PROVENANCE_API_PORT: 8010
-      PROVENANCE_API_OPENAPI_PATH: /workspace/contracts/provenance-read-api-v1.openapi.json
       PROVENANCE_API_ALLOWED_ORIGINS: ${PROVENANCE_API_ALLOWED_ORIGINS:-}
       PROVENANCE_S3_BUCKET: ${AIRFLOW_S3_BUCKET:-pachyderm}
       PROVENANCE_S3_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-pachyderm}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-pachyderm-secret-key-123456789}
       AWS_DEFAULT_REGION: us-east-1
-    volumes:
-      - ./pipelines/airflow:/workspace/pipelines/airflow:ro
-      - ./contracts:/workspace/contracts:ro
-    entrypoint: ["python", "/workspace/pipelines/airflow/provenance_api.py"]
     ports:
       - "${PROVENANCE_API_HOST_PORT:-8010}:8010"
     healthcheck:

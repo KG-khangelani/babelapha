@@ -26,10 +26,13 @@ PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
 PROVENANCE_ENDPOINT = os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get(
     "MINIO_ENDPOINT"
 )
+MODULE_DIR = Path(__file__).resolve().parent
+PACKAGED_OPENAPI_PATH = MODULE_DIR / "contracts" / "provenance-read-api-v1.openapi.json"
+REPOSITORY_OPENAPI_PATH = MODULE_DIR.parent.parent / "contracts" / "provenance-read-api-v1.openapi.json"
 OPENAPI_PATH = Path(
     os.environ.get(
         "PROVENANCE_API_OPENAPI_PATH",
-        str(Path(__file__).resolve().parents[2] / "contracts" / "provenance-read-api-v1.openapi.json"),
+        str(PACKAGED_OPENAPI_PATH if PACKAGED_OPENAPI_PATH.exists() else REPOSITORY_OPENAPI_PATH),
     )
 )
 ALLOWED_ORIGINS = {
