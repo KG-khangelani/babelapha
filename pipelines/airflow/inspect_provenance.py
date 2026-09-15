@@ -270,6 +270,67 @@ def read_openlineage_delivery_evidence(
     return {"states": states, "errors": errors}
 
 
+def _stage_attempt(record: dict, delivery: dict) -> dict:
+    """Return the compact, self-contained evidence needed to navigate one attempt."""
+    run = record["run"]
+    return {
+        "manifest_id": record["manifest_id"],
+        "attempt": run["attempt"],
+        "status": run["status"],
+        "stage": run["stage"],
+        "recorded_at": record["recorded_at"],
+        "decision": record["decision"],
+        "manifest_uri": record["links"]["manifest"],
+        "openlineage": {
+            "state": delivery["state"],
+            "integrity": delivery["integrity"],
+            "event_sha256": delivery["event_sha256"],
+        },
+    }
+
+
+def _stage_evidence(
+    records: list[dict],
+    expected_task_ids: list[str],
+    delivery_by_manifest_id: dict[str, dict],
+) -> list[dict]:
+    """Build an ordered stage ledger without treating missing evidence as execution state."""
+    by_task: dict[str, list[dict]] = {}
+    for record in records:
+        by_task.setdefault(record["run"]["task_id"], []).append(record)
+
+    expected_set = set(expected_task_ids)
+    if expected_task_ids:
+        tasks = [
+            (task_id, position, "EXPECTED")
+            for position, task_id in enumerate(expected_task_ids, start=1)
+        ]
+        tasks.extend(
+            (task_id, None, "UNEXPECTED")
+            for task_id in sorted(set(by_task) - expected_set)
+        )
+    else:
+        tasks = [(task_id, None, "UNKNOWN") for task_id in sorted(by_task)]
+
+    ledger = []
+    for task_id, contract_position, membership in tasks:
+        task_records = by_task.get(task_id, [])
+        attempts = [
+            _stage_attempt(record, delivery_by_manifest_id[record["manifest_id"]])
+            for record in task_records
+        ]
+        ledger.append(
+            {
+                "task_id": task_id,
+                "contract_position": contract_position,
+                "contract_membership": membership,
+                "evidence_state": "RECORDED" if attempts else "NO_IMMUTABLE_RECORD",
+                "attempts": attempts,
+            }
+        )
+    return ledger
+
+
 def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict | None = None) -> dict:
     """Group validated records by Airflow run without inventing run state."""
     grouped: dict[str, list[dict]] = {}
@@ -392,6 +453,11 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                     "not_recorded_task_ids": not_recorded_task_ids,
                     "unexpected_task_ids": unexpected_task_ids,
                 },
+                "stage_evidence": _stage_evidence(
+                    ordered,
+                    expected_task_ids,
+                    delivery_by_manifest_id,
+                ),
                 "records": ordered,
             }
         )
@@ -469,8 +535,21 @@ def render_text(view: dict) -> str:
                 f"evidence={coverage['contract_evidence_status']} "
                 f"sha256={_value(coverage['contract_sha256'])} "
                 f"embedded={coverage['records_with_embedded_contract']}/{coverage['record_count']}",
+                "Stage evidence:",
             ]
         )
+        for stage in run["stage_evidence"]:
+            position = _value(stage["contract_position"])
+            attempts = ", ".join(
+                f"{attempt['attempt']}:{attempt['status']}:{attempt['decision']['reason_code']}"
+                for attempt in stage["attempts"]
+            ) or "-"
+            lines.append(
+                "  "
+                f"position={position} task={stage['task_id']} "
+                f"membership={stage['contract_membership']} "
+                f"evidence={stage['evidence_state']} attempts={attempts}"
+            )
         if coverage["not_recorded_task_ids"]:
             lines.append(
                 "No immutable execution record: "

@@ -26,6 +26,11 @@ openlineage/delivered/<object-id>/<dag-run-id>/<task-id>/<attempt>-<status>.json
 An outbox object without its matching delivery receipt is pending and can be
 replayed without rebuilding or changing the original event.
 
+`provenance-read-api-v1.openapi.json` versions the read-only explorer boundary.
+Version `1.1.0` adds an ordered stage-evidence ledger to each run so consumers
+do not have to infer task topology, retries, or missing evidence from an
+unordered set of manifests.
+
 `reports/<object-id>/*.json` files remain mutable operational summaries for
 compatibility; they are not the provenance source of truth.
 

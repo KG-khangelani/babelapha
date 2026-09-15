@@ -18,7 +18,7 @@ from inspect_provenance import (
 )
 
 
-API_VERSION = "1.0.0"
+API_VERSION = "1.1.0"
 API_PORT = int(os.environ.get("PROVENANCE_API_PORT", "8010"))
 PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
     "S3_BUCKET", "pachyderm"

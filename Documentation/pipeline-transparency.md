@@ -207,8 +207,9 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary exposes the same operations for the
-future explorer without giving a browser direct MinIO credentials:
+The versioned read-only HTTP boundary (currently `1.1.0`) exposes the same
+operations for the future explorer without giving a browser direct MinIO
+credentials:
 
 ```text
 GET /health
@@ -260,6 +261,14 @@ The view reports both the recorded task count and every expected task with
 `No immutable execution record`. This makes downstream absence visible on
 failed runs without inventing an Airflow state: absence of callback evidence
 alone does not prove that a task was skipped or marked upstream-failed.
+
+Each run also has an ordered `stage_evidence` ledger derived from its immutable
+task contract. Every stage is labeled `RECORDED` or `NO_IMMUTABLE_RECORD`, and
+recorded stages group each attempt's status, decision, manifest identity, and
+OpenLineage delivery proof. `EXPECTED`, `UNEXPECTED`, and `UNKNOWN` membership
+labels distinguish contract topology from observed evidence without turning a
+missing callback into a fabricated execution result. Full manifests remain in
+the same response for exact artifact hashes and code/container identities.
 
 The inspector exits with code `3` for missing or inconsistent delivery
 evidence. Add `--require-delivered` in CI or an operational check to also return

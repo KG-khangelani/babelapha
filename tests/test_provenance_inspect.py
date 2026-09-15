@@ -163,6 +163,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "DAG: ingest_pipeline",
             "Task coverage: 2/8 recorded",
             "Task contract: source=CURRENT_REGISTRY_FALLBACK evidence=FALLBACK",
+            "Stage evidence:",
+            "position=5 task=transcode membership=EXPECTED evidence=RECORDED attempts=1:FAILED:TASK_FAILED",
             "No immutable execution record: validate_inputs, inspect_source, virus_scan, verify_outputs, mark_complete, verify_provenance",
             "[FAILED] stage=transcode task=transcode attempt=1",
             "decision=TASK_FAILED",
@@ -218,6 +220,20 @@ class ProvenanceInspectorTests(unittest.TestCase):
             },
         )
         self.assertEqual(run["statuses_observed"], ["FAILED", "RETRYING", "SUCCEEDED"])
+        stages = run["stage_evidence"]
+        self.assertEqual(
+            [stage["task_id"] for stage in stages],
+            list(provenance.PIPELINE_TASK_CONTRACTS["ingest_pipeline"]),
+        )
+        self.assertEqual(stages[0]["contract_position"], 1)
+        self.assertEqual(stages[0]["contract_membership"], "EXPECTED")
+        self.assertEqual(stages[0]["evidence_state"], "RECORDED")
+        self.assertEqual(
+            [attempt["status"] for attempt in stages[1]["attempts"]],
+            ["RETRYING", "FAILED"],
+        )
+        self.assertEqual(stages[2]["evidence_state"], "NO_IMMUTABLE_RECORD")
+        self.assertEqual(stages[2]["attempts"], [])
 
     def test_complete_task_coverage_includes_the_final_gate(self):
         records = [
@@ -232,6 +248,19 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertEqual(coverage["recorded_task_ids"], coverage["expected_task_ids"])
         self.assertEqual(coverage["not_recorded_task_ids"], [])
         self.assertEqual(coverage["unexpected_task_ids"], [])
+
+    def test_stage_ledger_appends_observed_tasks_outside_the_contract(self):
+        record = sample_record(task_id="legacy_side_task")
+
+        stage = inspector.build_view("interview-042", [record])["runs"][0][
+            "stage_evidence"
+        ][-1]
+
+        self.assertEqual(stage["task_id"], "legacy_side_task")
+        self.assertIsNone(stage["contract_position"])
+        self.assertEqual(stage["contract_membership"], "UNEXPECTED")
+        self.assertEqual(stage["evidence_state"], "RECORDED")
+        self.assertEqual(stage["attempts"][0]["manifest_id"], record["manifest_id"])
 
     def test_unknown_dag_reports_unknown_contract_and_preserves_records(self):
         record = sample_record(task_id="custom_stage", dag_id="historical_ingest")
@@ -256,6 +285,33 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertIn(
             "Task coverage: 1/unknown recorded",
             inspector.render_text(inspector.build_view("interview-042", [record])),
+        )
+        self.assertEqual(
+            run["stage_evidence"],
+            [
+                {
+                    "task_id": "custom_stage",
+                    "contract_position": None,
+                    "contract_membership": "UNKNOWN",
+                    "evidence_state": "RECORDED",
+                    "attempts": [
+                        inspector._stage_attempt(
+                            record,
+                            {
+                                "state": "NOT_CHECKED",
+                                "integrity": "NOT_CHECKED",
+                                "outbox_uri": None,
+                                "event_sha256": None,
+                                "receipt_uri": None,
+                                "endpoint": None,
+                                "http_status": None,
+                                "delivered_at": None,
+                                "error": None,
+                            },
+                        )
+                    ],
+                }
+            ],
         )
 
     def test_one_run_id_cannot_mix_dag_identities(self):
@@ -365,6 +421,9 @@ class ProvenanceInspectorTests(unittest.TestCase):
         )
         self.assertEqual(evidence["states"][pending_record["manifest_id"]]["state"], "PENDING")
         self.assertEqual(view["openlineage_delivery"]["state_counts"], {"DELIVERED": 1, "PENDING": 1})
+        stages = {stage["task_id"]: stage for stage in view["runs"][0]["stage_evidence"]}
+        self.assertEqual(stages["validate_media"]["attempts"][0]["openlineage"]["state"], "DELIVERED")
+        self.assertEqual(stages["transcode"]["attempts"][0]["openlineage"]["state"], "PENDING")
         self.assertIn("OpenLineage: DELIVERED=1, PENDING=1", rendered)
         self.assertIn("state=DELIVERED integrity=VERIFIED", rendered)
         self.assertIn("state=PENDING integrity=VERIFIED", rendered)

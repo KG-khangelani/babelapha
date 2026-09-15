@@ -156,6 +156,11 @@ s3://pachyderm/output/<id>/dash/*
    curl http://localhost:8010/api/v1/openapi.json
    ```
 
+   The media detail response includes an ordered `stage_evidence` ledger. It
+   groups retries and terminal decisions by task and explicitly marks expected
+   stages that have no immutable record, while the accompanying manifests retain
+   the exact artifact, Git, DAG-bundle, and container identities.
+
 Alternative event-driven path (closer to production):
 
 1. Send a webhook payload:
