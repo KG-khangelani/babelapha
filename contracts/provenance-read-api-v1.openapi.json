@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.6.0",
-    "description": "Read-only discovery and deterministic evidence-set identities over storage-bound canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.7.0",
+    "description": "Read-only discovery, deterministic evidence-set identities, and exact hash-verifiable evidence bundles over storage-bound canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -132,6 +132,42 @@
           "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
         }
       }
+    },
+    "/api/v1/media/{object_id}/evidence-bundle": {
+      "get": {
+        "operationId": "getMediaEvidenceBundle",
+        "description": "Return the exact validated canonical JSON documents behind the normalized provenance view. Each document includes its immutable storage URI and SHA-256 for independent verification.",
+        "parameters": [
+          {
+            "name": "object_id",
+            "in": "path",
+            "required": true,
+            "description": "Canonical percent-encoded media object identifier.",
+            "schema": {"type": "string", "minLength": 1}
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "description": "Restrict the evidence bundle to one exact Airflow run ID.",
+            "schema": {"type": "string", "minLength": 1}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact canonical manifests, queued OpenLineage events, and delivery receipts with their storage identities and hashes.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/EvidenceBundleEnvelope"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/InvalidRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/EvidenceIntegrityFailed"},
+          "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
+        }
+      }
     }
   },
   "components": {
@@ -167,7 +203,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.6.0"},
+          "api_version": {"const": "1.7.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -177,7 +213,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.6.0"},
+          "api_version": {"const": "1.7.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -194,7 +230,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.6.0"},
+          "api_version": {"const": "1.7.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -270,8 +306,62 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.6.0"},
+          "api_version": {"const": "1.7.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
+        }
+      },
+      "EvidenceBundleEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["api_version", "data"],
+        "properties": {
+          "api_version": {"const": "1.7.0"},
+          "data": {"$ref": "#/components/schemas/EvidenceBundle"}
+        }
+      },
+      "EvidenceBundle": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_id", "run_count", "record_count", "evidence_set", "documents", "openlineage_delivery"],
+        "properties": {
+          "object_id": {"type": "string", "minLength": 1},
+          "run_count": {"type": "integer", "minimum": 1},
+          "record_count": {"type": "integer", "minimum": 1},
+          "evidence_set": {"$ref": "#/components/schemas/EvidenceSetIdentity"},
+          "documents": {"$ref": "#/components/schemas/EvidenceDocuments"},
+          "openlineage_delivery": {"$ref": "#/components/schemas/OpenLineageDelivery"}
+        }
+      },
+      "EvidenceDocuments": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifests", "openlineage_events", "delivery_receipts"],
+        "properties": {
+          "manifests": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/EvidenceDocument"}
+          },
+          "openlineage_events": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/EvidenceDocument"}
+          },
+          "delivery_receipts": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/EvidenceDocument"}
+          }
+        }
+      },
+      "EvidenceDocument": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifest_id", "uri", "sha256", "canonicalization", "document"],
+        "properties": {
+          "manifest_id": {"type": "string", "format": "uuid"},
+          "uri": {"type": "string", "format": "uri"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "canonicalization": {"const": "SORTED_INDENTED_JSON_V1"},
+          "document": {"type": "object"}
         }
       },
       "ProvenanceView": {

@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.6.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.7.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -218,6 +218,7 @@ GET /api/v1/openapi.json
 GET /api/v1/media?limit=50&cursor=<opaque-token>
 GET /api/v1/media?include=evidence-summary
 GET /api/v1/media/<percent-encoded-object-id>?run_id=<run-id>
+GET /api/v1/media/<percent-encoded-object-id>/evidence-bundle?run_id=<run-id>
 ```
 
 `include=evidence-summary` keeps selection evidence-first without introducing
@@ -259,6 +260,19 @@ no insignificant whitespace, and the published evidence-set schema version.
 The same fingerprint is included in an opt-in catalog summary, giving the
 future explorer a stable citation and change-detection key without treating the
 mutable HTTP response as a new source of truth.
+
+The evidence-bundle route closes the independent-inspection gap without making
+MinIO public. It returns every validated canonical manifest, queued
+OpenLineage event, and delivery receipt in the selected object/run scope. Each
+entry carries the immutable S3 URI, manifest join identity, SHA-256, and exact
+JSON document. The per-entry `SORTED_INDENTED_JSON_V1` declaration means UTF-8
+JSON with lexicographically sorted keys, two-space indentation, escaped
+non-ASCII characters, and one trailing LF. A consumer can reproduce those
+stored bytes and verify the hash locally. This is deliberately distinct from
+the `evidence_set` fingerprint's `SORTED_COMPACT_JSON_V1` material. Documents
+that fail canonical or relationship validation are not relabeled as trusted;
+they remain visible through the bundle's OpenLineage delivery states and
+integrity errors.
 
 The API runs in its own non-root image rather than inheriting the Airflow
 runtime. Its Python base is digest-pinned, every Python dependency is version

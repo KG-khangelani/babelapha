@@ -154,6 +154,7 @@ s3://pachyderm/output/<id>/dash/*
    curl http://localhost:8010/api/v1/media
    curl 'http://localhost:8010/api/v1/media?include=evidence-summary'
    curl http://localhost:8010/api/v1/media/sample-001
+   curl http://localhost:8010/api/v1/media/sample-001/evidence-bundle
    curl http://localhost:8010/api/v1/openapi.json
    ```
 
@@ -175,7 +176,12 @@ s3://pachyderm/output/<id>/dash/*
    OpenLineage and delivery-receipt evidence, including hashes of both immutable
    objects. An `evidence_set` SHA-256 identifies the exact collection of
    manifests, lineage events, receipts, and integrity findings returned by the
-   selected view. Reads reject a manifest whose
+   selected view. The evidence-bundle route returns each validated canonical
+   manifest, queued event, and receipt as an exact JSON document beside its
+   immutable S3 URI, SHA-256, and declared canonicalization, so a client can
+   independently verify the source evidence without MinIO credentials. Invalid documents are
+   excluded from the validated document lists and remain visible through the
+   accompanying delivery state and integrity errors. Reads reject a manifest whose
    canonical bytes, declared identity, or self-link does not match its immutable
    S3 object key.
 

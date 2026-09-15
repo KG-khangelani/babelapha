@@ -683,6 +683,11 @@ class ProvenanceInspectorTests(unittest.TestCase):
                 records=[delivered_record, pending_record],
             )
         view = inspector.build_view("interview-042", [delivered_record, pending_record], evidence)
+        bundle = inspector.build_evidence_bundle(
+            "interview-042",
+            [delivered_record, pending_record],
+            evidence,
+        )
         rendered = inspector.render_text(view)
 
         self.assertEqual(
@@ -699,6 +704,24 @@ class ProvenanceInspectorTests(unittest.TestCase):
         self.assertEqual(view["evidence_set"]["manifest_count"], 2)
         self.assertEqual(view["evidence_set"]["openlineage_event_count"], 2)
         self.assertEqual(view["evidence_set"]["delivery_receipt_count"], 1)
+        self.assertEqual(bundle["evidence_set"], view["evidence_set"])
+        self.assertEqual(bundle["openlineage_delivery"], view["openlineage_delivery"])
+        self.assertEqual(len(bundle["documents"]["manifests"]), 2)
+        self.assertEqual(len(bundle["documents"]["openlineage_events"]), 2)
+        self.assertEqual(len(bundle["documents"]["delivery_receipts"]), 1)
+        for document_type, entries in bundle["documents"].items():
+            with self.subTest(document_type=document_type):
+                for entry in entries:
+                    self.assertEqual(
+                        entry["canonicalization"],
+                        "SORTED_INDENTED_JSON_V1",
+                    )
+                    self.assertEqual(
+                        entry["sha256"],
+                        hashlib.sha256(
+                            provenance.canonical_json_bytes(entry["document"])
+                        ).hexdigest(),
+                    )
         reordered = inspector.build_view(
             "interview-042",
             [pending_record, delivered_record],
@@ -770,6 +793,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
 
         state = evidence["states"][record["manifest_id"]]
         self.assertEqual(state["state"], "INTEGRITY_ERROR")
+        self.assertIn(record["manifest_id"], evidence["events"])
+        self.assertNotIn(record["manifest_id"], evidence["receipts"])
         self.assertEqual(
             state["receipt_sha256"],
             hashlib.sha256(client.objects[receipt_key]).hexdigest(),

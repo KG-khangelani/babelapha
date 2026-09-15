@@ -52,6 +52,7 @@ class ProvenanceAPITests(unittest.TestCase):
             "/api/v1/openapi.json",
             "/api/v1/media",
             "/api/v1/media/{object_id}",
+            "/api/v1/media/{object_id}/evidence-bundle",
         }
 
         self.assertEqual(contract["openapi"], "3.1.0")
@@ -69,6 +70,12 @@ class ProvenanceAPITests(unittest.TestCase):
         self.assertIn(
             "409",
             contract["paths"]["/api/v1/media/{object_id}"]["get"]["responses"],
+        )
+        self.assertIn(
+            "409",
+            contract["paths"]["/api/v1/media/{object_id}/evidence-bundle"]["get"][
+                "responses"
+            ],
         )
 
         status, served = api.route_get("/api/v1/openapi.json")
@@ -118,6 +125,14 @@ class ProvenanceAPITests(unittest.TestCase):
             "api_version": api.API_VERSION,
             "data": inspector.build_view("interview/002", [record]),
         }
+        bundle = {
+            "api_version": api.API_VERSION,
+            "data": inspector.build_evidence_bundle(
+                "interview/002",
+                [record],
+                {"states": {}, "events": {}, "receipts": {}, "errors": []},
+            ),
+        }
 
         schemas = copy.deepcopy(contract["components"]["schemas"])
         manifest_schema = json.loads(
@@ -127,7 +142,11 @@ class ProvenanceAPITests(unittest.TestCase):
         )
         manifest_schema.pop("$id", None)
         schemas["RunView"]["properties"]["records"]["items"] = manifest_schema
-        for name, payload in (("CatalogEnvelope", catalog), ("ProvenanceEnvelope", detail)):
+        for name, payload in (
+            ("CatalogEnvelope", catalog),
+            ("ProvenanceEnvelope", detail),
+            ("EvidenceBundleEnvelope", bundle),
+        ):
             with self.subTest(schema=name):
                 schema = {
                     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -143,7 +162,7 @@ class ProvenanceAPITests(unittest.TestCase):
         status, payload = api.route_get("/health")
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["api_version"], "1.6.0")
+        self.assertEqual(payload["api_version"], "1.7.0")
         self.assertEqual(payload["status"], "ok")
 
     def test_catalog_is_paginated_and_adds_canonical_detail_links(self):
@@ -331,7 +350,49 @@ class ProvenanceAPITests(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"api_version": "1.6.0", "data": view})
+        self.assertEqual(payload, {"api_version": "1.7.0", "data": view})
+        read.assert_called_once_with(
+            object_id="interview/002",
+            run_id="manual__run 42",
+            endpoint_url=api.PROVENANCE_ENDPOINT,
+            bucket=api.PROVENANCE_BUCKET,
+        )
+        lineage.assert_called_once_with(
+            object_id="interview/002",
+            records=records,
+            run_id="manual__run 42",
+            endpoint_url=api.PROVENANCE_ENDPOINT,
+            bucket=api.PROVENANCE_BUCKET,
+        )
+        build.assert_called_once_with("interview/002", records, delivery)
+
+    def test_evidence_bundle_reuses_the_same_strict_scoped_evidence(self):
+        records = [{"manifest_id": "manifest-1"}]
+        delivery = {"states": {}, "events": {}, "receipts": {}, "errors": []}
+        bundle = {
+            "object_id": "interview/002",
+            "record_count": 1,
+            "documents": {"manifests": []},
+        }
+        with (
+            mock.patch.object(api, "read_records", return_value=records) as read,
+            mock.patch.object(
+                api,
+                "read_openlineage_delivery_evidence",
+                return_value=delivery,
+            ) as lineage,
+            mock.patch.object(
+                api,
+                "build_evidence_bundle",
+                return_value=bundle,
+            ) as build,
+        ):
+            status, payload = api.route_get(
+                "/api/v1/media/interview%2F002/evidence-bundle?run_id=manual__run%2042"
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"api_version": "1.7.0", "data": bundle})
         read.assert_called_once_with(
             object_id="interview/002",
             run_id="manual__run 42",
@@ -355,6 +416,7 @@ class ProvenanceAPITests(unittest.TestCase):
             ("/api/v1/media?limit=0", "INVALID_LIMIT"),
             ("/api/v1/media/interview%2f002", "INVALID_OBJECT_ID"),
             ("/api/v1/media/interview-002?run_id=", "INVALID_RUN_ID"),
+            ("/api/v1/media//evidence-bundle", "NOT_FOUND"),
         )
         for target, code in cases:
             with self.subTest(target=target):

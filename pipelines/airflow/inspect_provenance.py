@@ -16,6 +16,7 @@ import urllib.parse
 DAGS_DIR = Path(__file__).resolve().parent / "dags"
 sys.path.insert(0, str(DAGS_DIR))
 EVIDENCE_SET_SCHEMA_VERSION = "1.0.0"
+EVIDENCE_DOCUMENT_CANONICALIZATION = "SORTED_INDENTED_JSON_V1"
 
 from provenance import (  # noqa: E402
     PIPELINE_TASK_CONTRACTS,
@@ -195,6 +196,8 @@ def read_openlineage_delivery_evidence(
         )
     )
     states: dict[str, dict] = {}
+    events: dict[str, dict] = {}
+    receipts: dict[str, dict] = {}
     errors: list[dict] = []
     matched_receipts: set[str] = set()
 
@@ -220,6 +223,15 @@ def read_openlineage_delivery_evidence(
             if manifest is None:
                 raise ValueError(f"queued event references unknown manifest {manifest_id}")
             validate_openlineage_event_for_manifest(event, manifest)
+            if manifest_id in states:
+                raise ValueError(f"duplicate queued event for manifest {manifest_id}")
+            events[manifest_id] = {
+                "manifest_id": manifest_id,
+                "uri": outbox_uri,
+                "sha256": event_sha256,
+                "canonicalization": EVIDENCE_DOCUMENT_CANONICALIZATION,
+                "document": event,
+            }
             state = {
                 "state": "PENDING",
                 "integrity": "VERIFIED",
@@ -238,6 +250,13 @@ def read_openlineage_delivery_evidence(
                 if canonical_json_bytes(receipt) != receipt_body:
                     raise ValueError("delivery receipt bytes are not canonical")
                 validate_openlineage_receipt(receipt, event, outbox_uri=outbox_uri)
+                receipts[manifest_id] = {
+                    "manifest_id": manifest_id,
+                    "uri": f"s3://{bucket}/{receipt_key}",
+                    "sha256": receipt_sha256,
+                    "canonicalization": EVIDENCE_DOCUMENT_CANONICALIZATION,
+                    "document": receipt,
+                }
                 state.update(
                     {
                         "state": "DELIVERED",
@@ -248,8 +267,6 @@ def read_openlineage_delivery_evidence(
                         "delivered_at": receipt["delivered_at"],
                     }
                 )
-            if manifest_id in states:
-                raise ValueError(f"duplicate queued event for manifest {manifest_id}")
             states[manifest_id] = state
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
@@ -309,7 +326,12 @@ def read_openlineage_delivery_evidence(
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-    return {"states": states, "errors": errors}
+    return {
+        "states": states,
+        "events": events,
+        "receipts": receipts,
+        "errors": errors,
+    }
 
 
 def _stage_attempt(record: dict, delivery: dict) -> dict:
@@ -631,6 +653,49 @@ def _evidence_set_identity(
             bool(item["receipt_uri"] and item["receipt_sha256"])
             for item in all_lineage
         ),
+    }
+
+
+def build_evidence_bundle(
+    object_id: str,
+    records: Iterable[dict],
+    delivery_evidence: dict,
+) -> dict:
+    """Return exact validated evidence documents for independent verification."""
+    records = list(records)
+    view = build_view(object_id, records, delivery_evidence)
+    manifests = sorted(
+        (
+            {
+                "manifest_id": record["manifest_id"],
+                "uri": record["links"]["manifest"],
+                "sha256": hashlib.sha256(canonical_json_bytes(record)).hexdigest(),
+                "canonicalization": EVIDENCE_DOCUMENT_CANONICALIZATION,
+                "document": record,
+            }
+            for record in records
+        ),
+        key=lambda item: (item["uri"], item["manifest_id"]),
+    )
+    events = sorted(
+        delivery_evidence.get("events", {}).values(),
+        key=lambda item: (item["uri"], item["manifest_id"]),
+    )
+    receipts = sorted(
+        delivery_evidence.get("receipts", {}).values(),
+        key=lambda item: (item["uri"], item["manifest_id"]),
+    )
+    return {
+        "object_id": object_id,
+        "run_count": view["run_count"],
+        "record_count": view["record_count"],
+        "evidence_set": view["evidence_set"],
+        "documents": {
+            "manifests": manifests,
+            "openlineage_events": events,
+            "delivery_receipts": receipts,
+        },
+        "openlineage_delivery": view["openlineage_delivery"],
     }
 
 
