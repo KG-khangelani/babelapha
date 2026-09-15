@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/openlineage-delivery-receipt-v1.schema.json",
+  "title": "Babelapha OpenLineage delivery receipt v1",
+  "description": "An immutable acknowledgement that one exact queued OpenLineage event was accepted by the configured lineage endpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "manifest_id",
+    "object_id",
+    "airflow_run_id",
+    "task_id",
+    "attempt",
+    "status",
+    "event_type",
+    "outbox_uri",
+    "event_sha256",
+    "endpoint",
+    "http_status",
+    "delivered_at"
+  ],
+  "properties": {
+    "$schema": {"type": "string", "format": "uri"},
+    "schema_version": {"const": "1.0.0"},
+    "manifest_id": {"type": "string", "format": "uuid"},
+    "object_id": {"type": "string", "minLength": 1},
+    "airflow_run_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["SUCCEEDED", "FAILED", "RETRYING", "SKIPPED"]},
+    "event_type": {"enum": ["COMPLETE", "FAIL", "ABORT"]},
+    "outbox_uri": {"type": "string", "format": "uri"},
+    "event_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "endpoint": {"type": "string", "format": "uri"},
+    "http_status": {"type": "integer", "minimum": 200, "maximum": 299},
+    "delivered_at": {"type": "string", "format": "date-time"}
+  }
+}

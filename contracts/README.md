@@ -14,6 +14,18 @@ output dataset uses `openlineage-babelapha-artifact-dataset-facet-v1.schema.json
 The event schema URLs are pinned to the Git commit containing those contracts,
 not to a mutable branch.
 
+Every event is first stored immutably in an OpenLineage outbox. A successful
+HTTP delivery creates a separate immutable acknowledgement conforming to
+`openlineage-delivery-receipt-v1.schema.json`:
+
+```text
+openlineage/outbox/<object-id>/<dag-run-id>/<task-id>/<attempt>-<status>.json
+openlineage/delivered/<object-id>/<dag-run-id>/<task-id>/<attempt>-<status>.json
+```
+
+An outbox object without its matching delivery receipt is pending and can be
+replayed without rebuilding or changing the original event.
+
 `reports/<object-id>/*.json` files remain mutable operational summaries for
 compatibility; they are not the provenance source of truth.
 
