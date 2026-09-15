@@ -257,7 +257,7 @@ services:
     command: ["--help"]
 
   marquez-db:
-    image: postgres:14.20
+    image: postgres:14.20@sha256:062b02051873a101837543675b5b4601cba06b1972d22f4b7969adbde5a280e4
     container_name: babelapha-marquez-db
     environment:
       POSTGRES_USER: ${MARQUEZ_DB_USER:-marquez}
@@ -272,7 +272,7 @@ services:
       retries: 12
 
   marquez:
-    image: marquezproject/marquez:0.51.1
+    image: marquezproject/marquez:0.51.1@sha256:0721c976cff17d8b14f7949d85d6dac9c7ea37cb9fe857caa19833730fcb1a50
     container_name: babelapha-marquez
     depends_on:
       marquez-db:
@@ -297,7 +297,7 @@ services:
       start_period: 15s
 
   marquez-web:
-    image: marquezproject/marquez-web:0.51.1
+    image: marquezproject/marquez-web:0.51.1@sha256:7312112ca0e611b0a37b00d3da6a677485ae4a97622b23d3ae24d849a927868b
     container_name: babelapha-marquez-web
     depends_on:
       marquez:

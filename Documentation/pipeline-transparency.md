@@ -197,6 +197,11 @@ The Compose stack exposes:
 - Marquez lineage UI: <http://localhost:3001>
 - Read-only provenance API: <http://localhost:8010/api/v1/media>
 
+The Marquez API, web UI, and its PostgreSQL database use both human-readable
+version tags and immutable registry digests in Compose. Recreating the local
+lineage view therefore cannot silently pull different image bytes under the
+same advertised version.
+
 Discover canonical media IDs, then select one item and inspect every recorded
 run, stage decision, failure,
 artifact hash, storage version, Pachyderm commit, Git commit, DAG hash, and

@@ -189,6 +189,23 @@ class KubernetesImageWiringTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(f"{name}: ${{{name}:-", compose)
 
+    def test_marquez_compose_stack_is_registry_digest_pinned(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        images = (
+            "postgres:14.20",
+            "marquezproject/marquez:0.51.1",
+            "marquezproject/marquez-web:0.51.1",
+        )
+        for image in images:
+            with self.subTest(image=image):
+                self.assertRegex(
+                    compose,
+                    re.compile(
+                        rf"image:\s+{re.escape(image)}@sha256:[0-9a-f]{{64}}$",
+                        re.MULTILINE,
+                    ),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
