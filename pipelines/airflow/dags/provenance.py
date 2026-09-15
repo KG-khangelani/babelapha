@@ -24,6 +24,7 @@ import uuid
 SCHEMA_VERSION = "1.0.0"
 PRODUCER = "https://github.com/KG-khangelani/babelapha"
 CONTRACTS_COMMIT = "089e23c53303b0c4b5298b12fdda11f646e3ff2b"
+DELIVERY_CONTRACTS_COMMIT = "ea9f16f30ae2facc8e5215c8156e1458bc969f87"
 MANIFEST_SCHEMA_URI = (
     f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{CONTRACTS_COMMIT}/"
     "contracts/provenance-manifest-v1.schema.json"
@@ -35,6 +36,10 @@ OPENLINEAGE_FACET_SCHEMA_URI = (
 OPENLINEAGE_ARTIFACT_FACET_SCHEMA_URI = (
     f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{CONTRACTS_COMMIT}/"
     "contracts/openlineage-babelapha-artifact-dataset-facet-v1.schema.json"
+)
+OPENLINEAGE_RECEIPT_SCHEMA_URI = (
+    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{DELIVERY_CONTRACTS_COMMIT}/"
+    "contracts/openlineage-delivery-receipt-v1.schema.json"
 )
 OPENLINEAGE_SCHEMA_URI = (
     "https://openlineage.io/spec/1-0-5/OpenLineage.json#/definitions/RunEvent"
@@ -314,6 +319,47 @@ def _s3_client(endpoint_url: str | None = None):
     )
 
 
+def _is_precondition_conflict(exc: Exception) -> bool:
+    response = getattr(exc, "response", {})
+    code = str(response.get("Error", {}).get("Code", ""))
+    status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code in {"PreconditionFailed", "ConditionalRequestConflict", "409", "412"} or status in {
+        409,
+        412,
+    }
+
+
+def _put_immutable_bytes(
+    *,
+    client,
+    bucket: str,
+    key: str,
+    body: bytes,
+    content_type: str,
+    metadata: dict[str, str],
+    equivalent=None,
+) -> str:
+    """Atomically create one object and accept only an equivalent duplicate."""
+    try:
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
+            Metadata=metadata,
+            IfNoneMatch="*",
+        )
+    except Exception as exc:
+        if not _is_precondition_conflict(exc):
+            raise
+        current = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        matches = equivalent(current, body) if equivalent else current == body
+        if matches:
+            return f"s3://{bucket}/{key}"
+        raise FileExistsError(f"Refusing to overwrite immutable object s3://{bucket}/{key}") from exc
+    return f"s3://{bucket}/{key}"
+
+
 def persist_manifest(record: dict, *, endpoint_url: str | None = None, bucket: str | None = None) -> str:
     """Persist an immutable manifest; an identical retry is idempotent."""
     validate_manifest(record)
@@ -321,31 +367,14 @@ def persist_manifest(record: dict, *, endpoint_url: str | None = None, bucket: s
     key = manifest_key(record)
     body = canonical_json_bytes(record)
     client = _s3_client(endpoint_url or os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT"))
-    try:
-        client.put_object(
-            Bucket=target_bucket,
-            Key=key,
-            Body=body,
-            ContentType="application/schema+json",
-            Metadata={"schema-version": SCHEMA_VERSION, "manifest-id": record["manifest_id"]},
-            IfNoneMatch="*",
-        )
-    except Exception as exc:
-        response = getattr(exc, "response", {})
-        code = str(response.get("Error", {}).get("Code", ""))
-        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        if code not in {"PreconditionFailed", "ConditionalRequestConflict", "409", "412"} and status not in {
-            409,
-            412,
-        }:
-            raise
-        current = client.get_object(Bucket=target_bucket, Key=key)["Body"].read()
-        if current == body:
-            return f"s3://{target_bucket}/{key}"
-        raise FileExistsError(
-            f"Refusing to overwrite immutable provenance record s3://{target_bucket}/{key}"
-        ) from exc
-    return f"s3://{target_bucket}/{key}"
+    return _put_immutable_bytes(
+        client=client,
+        bucket=target_bucket,
+        key=key,
+        body=body,
+        content_type="application/schema+json",
+        metadata={"schema-version": SCHEMA_VERSION, "manifest-id": record["manifest_id"]},
+    )
 
 
 def upload_file_artifact(
@@ -503,22 +532,241 @@ def build_openlineage_event(record: dict) -> dict:
     }
 
 
-def emit_openlineage(record: dict, *, url: str | None = None, timeout: float = 5.0) -> bool:
+def _openlineage_execution_facet(event: dict) -> dict:
+    try:
+        facet = event["run"]["facets"]["babelapha_execution"]
+    except (KeyError, TypeError) as exc:
+        raise ManifestValidationError("OpenLineage event is missing the Babelapha execution facet") from exc
+    if event["run"].get("runId") != facet.get("manifestId"):
+        raise ManifestValidationError("OpenLineage runId must equal the canonical manifest ID")
+    expected_event_type = {
+        "SUCCEEDED": "COMPLETE",
+        "FAILED": "FAIL",
+        "RETRYING": "FAIL",
+        "SKIPPED": "ABORT",
+    }.get(facet.get("status"))
+    if expected_event_type is None or event.get("eventType") != expected_event_type:
+        raise ManifestValidationError("OpenLineage event type does not match the manifest attempt status")
+    for role, items in (("input", event.get("inputs", [])), ("output", event.get("outputs", []))):
+        for item in items:
+            try:
+                item[f"{role}Facets"]["babelapha_artifact"]
+            except (KeyError, TypeError) as exc:
+                raise ManifestValidationError(
+                    f"OpenLineage {role} dataset is missing its Babelapha artifact facet"
+                ) from exc
+    return facet
+
+
+def openlineage_event_key(event: dict, state: str) -> str:
+    """Return the paired immutable outbox or delivery-receipt key."""
+    if state not in {"outbox", "delivered"}:
+        raise ValueError(f"Unsupported OpenLineage delivery state: {state}")
+    facet = _openlineage_execution_facet(event)
+    return "/".join(
+        [
+            "openlineage",
+            state,
+            _safe_segment(facet["objectId"]),
+            _safe_segment(facet["airflowRunId"]),
+            _safe_segment(facet["taskId"]),
+            f"{int(facet['attempt'])}-{str(facet['status']).lower()}.json",
+        ]
+    )
+
+
+def persist_openlineage_event(
+    event: dict,
+    *,
+    endpoint_url: str | None = None,
+    bucket: str | None = None,
+    client=None,
+) -> str:
+    """Store the exact OpenLineage event before any network delivery attempt."""
+    facet = _openlineage_execution_facet(event)
+    body = canonical_json_bytes(event)
+    target_bucket = bucket or os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm")
+    storage = client or _s3_client(
+        endpoint_url or os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT")
+    )
+    return _put_immutable_bytes(
+        client=storage,
+        bucket=target_bucket,
+        key=openlineage_event_key(event, "outbox"),
+        body=body,
+        content_type="application/json",
+        metadata={
+            "manifest-id": facet["manifestId"],
+            "event-sha256": hashlib.sha256(body).hexdigest(),
+        },
+    )
+
+
+def persist_openlineage_outbox(
+    record: dict,
+    *,
+    endpoint_url: str | None = None,
+    bucket: str | None = None,
+    client=None,
+) -> str:
+    """Build and store the OpenLineage event for a canonical manifest."""
+    return persist_openlineage_event(
+        build_openlineage_event(record),
+        endpoint_url=endpoint_url,
+        bucket=bucket,
+        client=client,
+    )
+
+
+def _openlineage_target(url: str | None = None) -> str | None:
     endpoint = (url or os.environ.get("OPENLINEAGE_URL", "")).rstrip("/")
     if not endpoint or os.environ.get("OPENLINEAGE_DISABLED", "").lower() in {"1", "true", "yes"}:
-        return False
+        return None
     path = os.environ.get("OPENLINEAGE_ENDPOINT", "/api/v1/lineage")
-    target = endpoint + "/" + path.lstrip("/")
+    return endpoint + "/" + path.lstrip("/")
+
+
+def emit_openlineage_event(
+    event: dict,
+    *,
+    url: str | None = None,
+    target: str | None = None,
+    timeout: float = 5.0,
+) -> int | None:
+    """Send one already-materialized event and return the accepting HTTP status."""
+    _openlineage_execution_facet(event)
+    resolved_target = target or _openlineage_target(url)
+    if not resolved_target:
+        return None
     request = urllib.request.Request(
-        target,
-        data=canonical_json_bytes(build_openlineage_event(record)),
+        resolved_target,
+        data=canonical_json_bytes(event),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         if response.status >= 300:
             raise RuntimeError(f"OpenLineage endpoint returned HTTP {response.status}")
-    return True
+        return response.status
+
+
+def emit_openlineage(record: dict, *, url: str | None = None, timeout: float = 5.0) -> bool:
+    """Compatibility wrapper that builds and sends an event from a manifest."""
+    return emit_openlineage_event(build_openlineage_event(record), url=url, timeout=timeout) is not None
+
+
+def _equivalent_delivery_receipts(current: bytes, desired: bytes) -> bool:
+    try:
+        current_record = json.loads(current)
+        desired_record = json.loads(desired)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not current_record.get("delivered_at") or not desired_record.get("delivered_at"):
+        return False
+    current_record.pop("delivered_at", None)
+    desired_record.pop("delivered_at", None)
+    return current_record == desired_record
+
+
+def validate_openlineage_receipt(receipt: dict, event: dict, *, outbox_uri: str) -> None:
+    """Validate the receipt identity against the exact queued event."""
+    facet = _openlineage_execution_facet(event)
+    required = {
+        "$schema",
+        "schema_version",
+        "manifest_id",
+        "object_id",
+        "airflow_run_id",
+        "task_id",
+        "attempt",
+        "status",
+        "event_type",
+        "outbox_uri",
+        "event_sha256",
+        "endpoint",
+        "http_status",
+        "delivered_at",
+    }
+    if set(receipt) != required:
+        raise ManifestValidationError("OpenLineage delivery receipt fields do not match the v1 contract")
+    expected = {
+        "$schema": OPENLINEAGE_RECEIPT_SCHEMA_URI,
+        "schema_version": SCHEMA_VERSION,
+        "manifest_id": facet["manifestId"],
+        "object_id": facet["objectId"],
+        "airflow_run_id": facet["airflowRunId"],
+        "task_id": facet["taskId"],
+        "attempt": facet["attempt"],
+        "status": facet["status"],
+        "event_type": event["eventType"],
+        "outbox_uri": outbox_uri,
+        "event_sha256": hashlib.sha256(canonical_json_bytes(event)).hexdigest(),
+    }
+    for field, expected_value in expected.items():
+        if receipt.get(field) != expected_value:
+            raise ManifestValidationError(f"OpenLineage delivery receipt has the wrong {field}")
+    if not isinstance(receipt["endpoint"], str) or not urllib.parse.urlparse(receipt["endpoint"]).scheme:
+        raise ManifestValidationError("OpenLineage delivery receipt endpoint must be an absolute URI")
+    if not isinstance(receipt["http_status"], int) or not 200 <= receipt["http_status"] <= 299:
+        raise ManifestValidationError("OpenLineage delivery receipt HTTP status must be 2xx")
+    try:
+        delivered_at = datetime.fromisoformat(receipt["delivered_at"].replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise ManifestValidationError("OpenLineage delivery receipt timestamp is invalid") from exc
+    if delivered_at.tzinfo is None:
+        raise ManifestValidationError("OpenLineage delivery receipt timestamp must include a timezone")
+
+
+def persist_openlineage_receipt(
+    event: dict,
+    *,
+    outbox_uri: str,
+    openlineage_target: str,
+    http_status: int,
+    endpoint_url: str | None = None,
+    bucket: str | None = None,
+    client=None,
+) -> str:
+    """Acknowledge delivery of the exact queued bytes without mutating the outbox."""
+    facet = _openlineage_execution_facet(event)
+    if not 200 <= int(http_status) <= 299:
+        raise ValueError("A delivery receipt requires an accepting 2xx HTTP status")
+    event_body = canonical_json_bytes(event)
+    receipt = {
+        "$schema": OPENLINEAGE_RECEIPT_SCHEMA_URI,
+        "schema_version": SCHEMA_VERSION,
+        "manifest_id": facet["manifestId"],
+        "object_id": facet["objectId"],
+        "airflow_run_id": facet["airflowRunId"],
+        "task_id": facet["taskId"],
+        "attempt": facet["attempt"],
+        "status": facet["status"],
+        "event_type": event["eventType"],
+        "outbox_uri": outbox_uri,
+        "event_sha256": hashlib.sha256(event_body).hexdigest(),
+        "endpoint": openlineage_target,
+        "http_status": int(http_status),
+        "delivered_at": utc_iso(),
+    }
+    validate_openlineage_receipt(receipt, event, outbox_uri=outbox_uri)
+    body = canonical_json_bytes(receipt)
+    target_bucket = bucket or os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm")
+    storage = client or _s3_client(
+        endpoint_url or os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT")
+    )
+    return _put_immutable_bytes(
+        client=storage,
+        bucket=target_bucket,
+        key=openlineage_event_key(event, "delivered"),
+        body=body,
+        content_type="application/schema+json",
+        metadata={
+            "schema-version": SCHEMA_VERSION,
+            "manifest-id": facet["manifestId"],
+            "event-sha256": receipt["event_sha256"],
+        },
+        equivalent=_equivalent_delivery_receipts,
+    )
 
 
 def _package_version(name: str) -> str | None:
@@ -662,18 +910,44 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
 
 
 def emit_airflow_manifest(context: dict, status: str) -> None:
-    """Best-effort Airflow callback: persist evidence, then emit OpenLineage."""
+    """Persist canonical evidence and a replayable OpenLineage delivery pair."""
     try:
         record = build_airflow_manifest(context, status)
         location = persist_manifest(record)
         print(f"[provenance] Stored immutable record: {location}")
-        if emit_openlineage(record):
-            print(f"[provenance] Emitted OpenLineage event: {record['manifest_id']}")
-        else:
-            print("[provenance] OpenLineage emission skipped: endpoint disabled or not configured")
     except Exception as exc:
         # Callback failures must be loud without masking the task's original state.
         print(f"[provenance] ERROR: {type(exc).__name__}: {exc}")
+        return
+
+    try:
+        event = build_openlineage_event(record)
+        outbox_uri = persist_openlineage_event(event)
+        print(f"[provenance] Queued immutable OpenLineage event: {outbox_uri}")
+    except Exception as exc:
+        print(f"[provenance] ERROR queuing OpenLineage event: {type(exc).__name__}: {exc}")
+        return
+
+    target = _openlineage_target()
+    if not target:
+        print(f"[provenance] OpenLineage event pending: endpoint disabled or not configured ({outbox_uri})")
+        return
+
+    try:
+        http_status = emit_openlineage_event(event, target=target)
+        if http_status is None:  # Defensive: target was resolved immediately above.
+            print(f"[provenance] OpenLineage event pending: endpoint unavailable ({outbox_uri})")
+            return
+        receipt_uri = persist_openlineage_receipt(
+            event,
+            outbox_uri=outbox_uri,
+            openlineage_target=target,
+            http_status=http_status,
+        )
+        print(f"[provenance] Emitted OpenLineage event: {record['manifest_id']}")
+        print(f"[provenance] Stored immutable delivery receipt: {receipt_uri}")
+    except Exception as exc:
+        print(f"[provenance] OpenLineage event pending after delivery error: {type(exc).__name__}: {exc}")
 
 
 def provenance_success_callback(context: dict) -> None:

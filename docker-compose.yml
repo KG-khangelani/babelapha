@@ -212,6 +212,21 @@ services:
     entrypoint: ["python", "/workspace/pipelines/airflow/inspect_provenance.py"]
     command: ["--help"]
 
+  provenance-replay:
+    <<: *airflow_base
+    profiles: ["tools"]
+    depends_on:
+      minio:
+        condition: service_healthy
+      marquez:
+        condition: service_healthy
+    environment:
+      <<: *airflow_env
+    volumes:
+      - ./pipelines/airflow:/workspace/pipelines/airflow:ro
+    entrypoint: ["python", "/workspace/pipelines/airflow/replay_openlineage.py"]
+    command: ["--help"]
+
   marquez-db:
     image: postgres:14.20
     container_name: babelapha-marquez-db

@@ -1,8 +1,10 @@
 # Airflow Pipelines
 
 This directory contains Airflow DAGs that orchestrate media ingestion and emit
-immutable provenance evidence plus OpenLineage events. `ingest_pipeline` is the
-production Kubernetes flow; `ingest_pipeline_local` is the Docker Compose flow.
+immutable provenance evidence plus replayable OpenLineage events.
+`ingest_pipeline` is the production Kubernetes flow; `ingest_pipeline_local`
+is the Docker Compose flow. Each event is durably queued before delivery and a
+separate immutable receipt records acceptance by Marquez.
 
 ## Triggering Methods
 
@@ -96,4 +98,5 @@ pip install "apache-airflow[celery]==3.3.1" --constraint "https://raw.githubuser
 All attempts—including failed retries—are stored under
 `provenance/<object-id>/<run-id>/`. See
 [`../../Documentation/pipeline-transparency.md`](../../Documentation/pipeline-transparency.md)
-for the contract and exact-identity requirements.
+for the contract, exact-identity requirements, and OpenLineage recovery
+commands.

@@ -1,5 +1,6 @@
 import copy
 from datetime import datetime, timezone
+import hashlib
 import io
 import importlib.util
 import json
@@ -21,6 +22,29 @@ SPEC = importlib.util.spec_from_file_location("babelapha_provenance", MODULE_PAT
 provenance = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(provenance)
+
+
+class PreconditionFailed(Exception):
+    response = {
+        "Error": {"Code": "PreconditionFailed"},
+        "ResponseMetadata": {"HTTPStatusCode": 412},
+    }
+
+
+class MemoryS3:
+    def __init__(self):
+        self.objects = {}
+        self.puts = []
+
+    def put_object(self, **kwargs):
+        self.puts.append(kwargs)
+        key = kwargs["Key"]
+        if key in self.objects:
+            raise PreconditionFailed()
+        self.objects[key] = kwargs["Body"]
+
+    def get_object(self, *, Key, **_kwargs):
+        return {"Body": io.BytesIO(self.objects[Key])}
 
 
 class ProvenanceContractTests(unittest.TestCase):
@@ -92,12 +116,6 @@ class ProvenanceContractTests(unittest.TestCase):
                 self.assertEqual(provenance._git_commit(identity_file), "a" * 40)
 
     def test_persistence_is_atomically_append_only_and_idempotent(self):
-        class PreconditionFailed(Exception):
-            response = {
-                "Error": {"Code": "PreconditionFailed"},
-                "ResponseMetadata": {"HTTPStatusCode": 412},
-            }
-
         class FakeS3:
             def __init__(self):
                 self.body = None
@@ -270,6 +288,110 @@ class ProvenanceContractTests(unittest.TestCase):
                 self.assertEqual(execution_facet["decisionOutcome"], outcome)
                 self.assertEqual(execution_facet["decisionReasonCode"], reason_code)
 
+    def test_openlineage_outbox_preserves_exact_event_bytes_and_rejects_conflicts(self):
+        client = MemoryS3()
+        record = self.sample_manifest()
+        event = provenance.build_openlineage_event(record)
+        location = provenance.persist_openlineage_outbox(record, client=client)
+        key = provenance.openlineage_event_key(event, "outbox")
+
+        self.assertEqual(location, f"s3://pachyderm/{key}")
+        self.assertEqual(client.objects[key], provenance.canonical_json_bytes(event))
+        self.assertEqual(
+            client.puts[0]["Metadata"]["event-sha256"],
+            hashlib.sha256(provenance.canonical_json_bytes(event)).hexdigest(),
+        )
+        self.assertEqual(location, provenance.persist_openlineage_event(event, client=client))
+
+        conflicting = copy.deepcopy(event)
+        conflicting["run"]["facets"]["babelapha_execution"]["decisionMessage"] = "different bytes"
+        with self.assertRaises(FileExistsError):
+            provenance.persist_openlineage_event(conflicting, client=client)
+
+    def test_openlineage_delivery_receipt_is_schema_pinned_and_idempotent(self):
+        client = MemoryS3()
+        event = provenance.build_openlineage_event(self.sample_manifest())
+        outbox_uri = provenance.persist_openlineage_event(event, client=client)
+        target = "http://marquez:5000/api/v1/lineage"
+        with mock.patch.object(
+            provenance,
+            "utc_iso",
+            side_effect=("2026-09-15T09:00:00Z", "2026-09-15T09:01:00Z"),
+        ):
+            first = provenance.persist_openlineage_receipt(
+                event,
+                outbox_uri=outbox_uri,
+                openlineage_target=target,
+                http_status=201,
+                client=client,
+            )
+            second = provenance.persist_openlineage_receipt(
+                event,
+                outbox_uri=outbox_uri,
+                openlineage_target=target,
+                http_status=201,
+                client=client,
+            )
+
+        self.assertEqual(first, second)
+        receipt_key = provenance.openlineage_event_key(event, "delivered")
+        receipt = json.loads(client.objects[receipt_key])
+        provenance.validate_openlineage_receipt(receipt, event, outbox_uri=outbox_uri)
+        self.assertIn(provenance.DELIVERY_CONTRACTS_COMMIT, receipt["$schema"])
+        self.assertEqual(receipt["delivered_at"], "2026-09-15T09:00:00Z")
+
+    def test_airflow_callback_leaves_queued_event_pending_after_delivery_error(self):
+        record = self.sample_manifest()
+        output = io.StringIO()
+        with (
+            mock.patch.object(provenance, "build_airflow_manifest", return_value=record),
+            mock.patch.object(provenance, "persist_manifest", return_value=record["links"]["manifest"]),
+            mock.patch.object(
+                provenance,
+                "persist_openlineage_event",
+                return_value="s3://pachyderm/openlineage/outbox/queued.json",
+            ) as persist_event,
+            mock.patch.object(
+                provenance,
+                "_openlineage_target",
+                return_value="http://marquez:5000/api/v1/lineage",
+            ),
+            mock.patch.object(provenance, "emit_openlineage_event", side_effect=OSError("offline")),
+            mock.patch("sys.stdout", output),
+        ):
+            provenance.emit_airflow_manifest({}, "FAILED")
+
+        persist_event.assert_called_once()
+        self.assertIn("Queued immutable OpenLineage event", output.getvalue())
+        self.assertIn("pending after delivery error: OSError: offline", output.getvalue())
+
+    def test_airflow_callback_receipts_successful_delivery_of_the_queued_event(self):
+        record = self.sample_manifest()
+        outbox_uri = "s3://pachyderm/openlineage/outbox/queued.json"
+        target = "http://marquez:5000/api/v1/lineage"
+        with (
+            mock.patch.object(provenance, "build_airflow_manifest", return_value=record),
+            mock.patch.object(provenance, "persist_manifest", return_value=record["links"]["manifest"]),
+            mock.patch.object(provenance, "persist_openlineage_event", return_value=outbox_uri),
+            mock.patch.object(provenance, "_openlineage_target", return_value=target),
+            mock.patch.object(provenance, "emit_openlineage_event", return_value=201) as emit,
+            mock.patch.object(
+                provenance,
+                "persist_openlineage_receipt",
+                return_value="s3://pachyderm/openlineage/delivered/receipt.json",
+            ) as persist_receipt,
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
+            provenance.emit_airflow_manifest({}, "SUCCEEDED")
+
+        queued_event = emit.call_args.args[0]
+        persist_receipt.assert_called_once_with(
+            queued_event,
+            outbox_uri=outbox_uri,
+            openlineage_target=target,
+            http_status=201,
+        )
+
     def test_openlineage_skip_is_reported_instead_of_claimed_as_emitted(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             self.assertFalse(provenance.emit_openlineage(self.sample_manifest()))
@@ -307,6 +429,24 @@ class ProvenanceContractTests(unittest.TestCase):
             format_checker=jsonschema.FormatChecker(),
         )
         artifact_validator.validate(event["outputs"][0]["outputFacets"]["babelapha_artifact"])
+
+        delivery_schema = json.loads(
+            (ROOT / "contracts" / "openlineage-delivery-receipt-v1.schema.json").read_text()
+        )
+        client = MemoryS3()
+        outbox_uri = provenance.persist_openlineage_event(event, client=client)
+        provenance.persist_openlineage_receipt(
+            event,
+            outbox_uri=outbox_uri,
+            openlineage_target="http://marquez:5000/api/v1/lineage",
+            http_status=201,
+            client=client,
+        )
+        receipt = json.loads(client.objects[provenance.openlineage_event_key(event, "delivered")])
+        jsonschema.Draft202012Validator(
+            delivery_schema,
+            format_checker=jsonschema.FormatChecker(),
+        ).validate(receipt)
 
 
 if __name__ == "__main__":

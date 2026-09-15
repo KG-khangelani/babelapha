@@ -18,8 +18,10 @@ flowchart LR
     T --> P
     Q --> P
 
-    P --> O[OpenLineage events]
+    P --> X[(Immutable OpenLineage outbox)]
+    X --> O[OpenLineage delivery]
     O --> M[Marquez API and graph]
+    O --> R[(Immutable delivery receipt)]
 ```
 
 ## Canonical record
@@ -124,6 +126,26 @@ Events are sent to:
 ```text
 POST http://marquez:5000/api/v1/lineage
 ```
+
+Each callback stores the canonical manifest and the exact serialized
+OpenLineage event before attempting HTTP delivery. A successful 2xx response
+creates a separate receipt containing the event SHA-256 and endpoint. If
+Marquez is unavailable, the manifest and outbox event remain intact and the
+missing receipt makes the pending state explicit.
+
+Inspect pending delivery without changing anything, then replay it:
+
+```powershell
+docker compose run --rm provenance-replay --object-id <object-id> --dry-run
+docker compose run --rm provenance-replay --object-id <object-id>
+```
+
+Use `--manifest-id <uuid>` for one exact task attempt. The replay command sends
+the immutable queued event; it never rebuilds an event from current code. It
+validates existing receipts against the queued bytes and refuses to treat a
+corrupt or mismatched receipt as delivered. In production, run
+`pipelines/airflow/replay_openlineage.py` with the same provenance S3 and
+OpenLineage environment variables used by Airflow.
 
 The Compose stack exposes:
 
