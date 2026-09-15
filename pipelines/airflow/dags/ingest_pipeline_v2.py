@@ -19,6 +19,7 @@ from provenance import (
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
+    required_upstream_task_ids,
 )
 
 
@@ -33,20 +34,6 @@ DIAGNOSTIC_IMAGE = os.environ.get(
     "BABELAPHA_DIAGNOSTIC_IMAGE",
     "python@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84",
 )
-
-REQUIRED_PROVENANCE_TASKS = [
-    "validate_inputs",
-    "pre_scan_check",
-    "run_virus_scan",
-    "post_scan_check",
-    "pre_validate_check",
-    "run_media_validation",
-    "post_validate_check",
-    "pre_transcode_check",
-    "run_transcode",
-    "post_transcode_check",
-    "finalize",
-]
 
 default_args = {
     "retries": 1,
@@ -216,7 +203,7 @@ def ingest_pipeline_v2():
         locations = assert_success_manifests(
             object_id=inputs["object_id"],
             run_id=dag_run.run_id,
-            task_ids=REQUIRED_PROVENANCE_TASKS,
+            task_ids=required_upstream_task_ids("ingest_pipeline_v2"),
             endpoint_url=PROVENANCE_S3_ENDPOINT,
             bucket=PROVENANCE_S3_BUCKET,
         )

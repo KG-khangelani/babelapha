@@ -55,9 +55,60 @@ MEDIA_TYPES_BY_SUFFIX = {
     ".ts": "video/mp2t",
 }
 
+# Ordered task contracts serve two purposes: DAG gates use the upstream subset
+# as their completeness requirement, while readers can expose tasks for which
+# no immutable callback record exists. Keep the gate last in every contract.
+PIPELINE_TASK_CONTRACTS = {
+    "ingest_pipeline": (
+        "validate_inputs",
+        "inspect_source",
+        "virus_scan",
+        "validate_media",
+        "transcode",
+        "verify_outputs",
+        "mark_complete",
+        "verify_provenance",
+    ),
+    "ingest_pipeline_local": (
+        "validate_inputs",
+        "download_from_minio",
+        "virus_scan",
+        "validate_media",
+        "transcode",
+        "upload_results",
+        "mark_complete",
+        "verify_provenance",
+    ),
+    "ingest_pipeline_v2": (
+        "validate_inputs",
+        "pre_scan_check",
+        "run_virus_scan",
+        "post_scan_check",
+        "pre_validate_check",
+        "run_media_validation",
+        "post_validate_check",
+        "pre_transcode_check",
+        "run_transcode",
+        "post_transcode_check",
+        "finalize",
+        "verify_provenance",
+    ),
+}
+
 
 class ManifestValidationError(ValueError):
     """Raised when a provenance record violates the v1 contract."""
+
+
+def required_upstream_task_ids(dag_id: str) -> list[str]:
+    """Return the exact task set a shipped DAG's final gate must validate."""
+    try:
+        task_ids = PIPELINE_TASK_CONTRACTS[dag_id]
+    except KeyError as exc:
+        raise ValueError(f"No pipeline task contract is registered for DAG {dag_id!r}") from exc
+    if not task_ids or task_ids[-1] != "verify_provenance":
+        raise ValueError(f"Pipeline task contract for DAG {dag_id!r} has no final provenance gate")
+    return list(task_ids[:-1])
 
 
 def media_type_for_uri(uri: str, reported: str | None = None) -> str | None:

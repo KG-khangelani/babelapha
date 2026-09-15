@@ -188,6 +188,14 @@ receipt, accepting endpoint, HTTP status, and delivery time. A queued event is
 marked verified only when all of its execution and artifact facts match the
 canonical manifest.
 
+For each shipped DAG, the inspector also compares the recorded task IDs with
+the ordered DAG task contract. It reports both the recorded count and every
+expected task with `No immutable execution record`. This makes downstream
+absence visible on failed runs without inventing an Airflow state: absence of
+callback evidence alone does not prove that a task was skipped or marked
+upstream-failed. Unknown DAG IDs are shown with an unknown contract instead of
+being judged against a current pipeline.
+
 The inspector exits with code `3` for missing or inconsistent delivery
 evidence. Add `--require-delivered` in CI or an operational check to also return
 code `4` while any valid event remains pending.

@@ -20,6 +20,7 @@ from provenance import (
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
+    required_upstream_task_ids,
     s3_artifact_from_file,
     upload_file_artifact,
 )
@@ -375,15 +376,7 @@ def ingest_pipeline_local():
         locations = assert_success_manifests(
             object_id=inputs["object_id"],
             run_id=dag_run.run_id,
-            task_ids=[
-                "validate_inputs",
-                "download_from_minio",
-                "virus_scan",
-                "validate_media",
-                "transcode",
-                "upload_results",
-                "mark_complete",
-            ],
+            task_ids=required_upstream_task_ids("ingest_pipeline_local"),
             endpoint_url=MINIO_ENDPOINT,
             bucket=S3_BUCKET,
         )

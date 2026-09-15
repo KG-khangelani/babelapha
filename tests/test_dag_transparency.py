@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DAGS_DIR = ROOT / "pipelines" / "airflow" / "dags"
 sys.path.insert(0, str(DAGS_DIR))
 
+from provenance import PIPELINE_TASK_CONTRACTS, required_upstream_task_ids
+
 try:
     from airflow.dag_processing.dagbag import DagBag
 except ModuleNotFoundError:  # Lightweight host runs may omit Airflow.
@@ -25,13 +27,16 @@ class DagTransparencyContractTests(unittest.TestCase):
             raise AssertionError(cls.bag.import_errors)
 
     def test_every_shipped_dag_ends_behind_the_provenance_gate(self):
-        for dag_id in ("ingest_pipeline", "ingest_pipeline_local", "ingest_pipeline_v2"):
+        self.assertEqual(set(self.bag.dags), set(PIPELINE_TASK_CONTRACTS))
+        for dag_id, contracted_tasks in PIPELINE_TASK_CONTRACTS.items():
             with self.subTest(dag_id=dag_id):
                 dag = self.bag.dags[dag_id]
                 gate = dag.task_dict["verify_provenance"]
                 ancestors = {task.task_id for task in gate.get_flat_relatives(upstream=True)}
                 self.assertEqual(ancestors, set(dag.task_ids) - {"verify_provenance"})
                 self.assertEqual(gate.downstream_task_ids, set())
+                self.assertEqual(set(dag.task_ids), set(contracted_tasks))
+                self.assertEqual(required_upstream_task_ids(dag_id), list(contracted_tasks[:-1]))
 
     def test_every_v2_task_emits_success_failure_and_retry_evidence(self):
         dag = self.bag.dags["ingest_pipeline_v2"]
@@ -74,19 +79,7 @@ class DagTransparencyContractTests(unittest.TestCase):
     def test_v2_gate_validates_every_exact_upstream_pair(self):
         dag = self.bag.dags["ingest_pipeline_v2"]
         gate = dag.task_dict["verify_provenance"].python_callable
-        expected_tasks = [
-            "validate_inputs",
-            "pre_scan_check",
-            "run_virus_scan",
-            "post_scan_check",
-            "pre_validate_check",
-            "run_media_validation",
-            "post_validate_check",
-            "pre_transcode_check",
-            "run_transcode",
-            "post_transcode_check",
-            "finalize",
-        ]
+        expected_tasks = required_upstream_task_ids("ingest_pipeline_v2")
         call = {}
 
         def validate_pairs(**kwargs):

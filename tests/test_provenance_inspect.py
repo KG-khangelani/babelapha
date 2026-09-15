@@ -37,7 +37,13 @@ class MemoryS3:
         return Paginator()
 
 
-def sample_record(*, task_id="validate_media", status="SUCCEEDED", recorded_at="2026-09-15T08:00:00Z"):
+def sample_record(
+    *,
+    task_id="validate_media",
+    status="SUCCEEDED",
+    recorded_at="2026-09-15T08:00:00Z",
+    dag_id="ingest_pipeline",
+):
     source = provenance.artifact(
         "s3://pachyderm/incoming/interview-042/interview.mp4",
         sha256="a" * 64,
@@ -51,7 +57,7 @@ def sample_record(*, task_id="validate_media", status="SUCCEEDED", recorded_at="
         object_id="interview-042",
         filename="interview.mp4",
         run_id="manual__run-42",
-        dag_id="ingest_pipeline",
+        dag_id=dag_id,
         task_id=task_id,
         stage=task_id,
         attempt=1,
@@ -83,6 +89,9 @@ class ProvenanceInspectorTests(unittest.TestCase):
 
         for expected in (
             "Run: manual__run-42",
+            "DAG: ingest_pipeline",
+            "Task coverage: 2/8 recorded",
+            "No immutable execution record: validate_inputs, inspect_source, virus_scan, verify_outputs, mark_complete, verify_provenance",
             "[FAILED] stage=transcode task=transcode attempt=1",
             "decision=TASK_FAILED",
             "sha256=" + "a" * 64,
@@ -93,6 +102,86 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "container=registry/validate digest=sha256:" + "d" * 64,
         ):
             self.assertIn(expected, rendered)
+
+    def test_task_coverage_exposes_missing_stages_without_inventing_state(self):
+        records = [
+            sample_record(task_id="validate_inputs"),
+            sample_record(
+                task_id="inspect_source",
+                status="RETRYING",
+                recorded_at="2026-09-15T08:01:00Z",
+            ),
+            sample_record(
+                task_id="inspect_source",
+                status="FAILED",
+                recorded_at="2026-09-15T08:02:00Z",
+            ),
+        ]
+
+        run = inspector.build_view("interview-042", records)["runs"][0]
+
+        self.assertEqual(run["dag_id"], "ingest_pipeline")
+        self.assertEqual(
+            run["task_coverage"],
+            {
+                "contract_known": True,
+                "expected_task_ids": list(provenance.PIPELINE_TASK_CONTRACTS["ingest_pipeline"]),
+                "recorded_task_ids": ["validate_inputs", "inspect_source"],
+                "not_recorded_task_ids": [
+                    "virus_scan",
+                    "validate_media",
+                    "transcode",
+                    "verify_outputs",
+                    "mark_complete",
+                    "verify_provenance",
+                ],
+                "unexpected_task_ids": [],
+            },
+        )
+        self.assertEqual(run["statuses_observed"], ["FAILED", "RETRYING", "SUCCEEDED"])
+
+    def test_complete_task_coverage_includes_the_final_gate(self):
+        records = [
+            sample_record(task_id=task_id, recorded_at=f"2026-09-15T08:{minute:02d}:00Z")
+            for minute, task_id in enumerate(
+                provenance.PIPELINE_TASK_CONTRACTS["ingest_pipeline"]
+            )
+        ]
+
+        coverage = inspector.build_view("interview-042", records)["runs"][0]["task_coverage"]
+
+        self.assertEqual(coverage["recorded_task_ids"], coverage["expected_task_ids"])
+        self.assertEqual(coverage["not_recorded_task_ids"], [])
+        self.assertEqual(coverage["unexpected_task_ids"], [])
+
+    def test_unknown_dag_reports_unknown_contract_and_preserves_records(self):
+        record = sample_record(task_id="custom_stage", dag_id="historical_ingest")
+
+        run = inspector.build_view("interview-042", [record])["runs"][0]
+
+        self.assertEqual(
+            run["task_coverage"],
+            {
+                "contract_known": False,
+                "expected_task_ids": [],
+                "recorded_task_ids": ["custom_stage"],
+                "not_recorded_task_ids": [],
+                "unexpected_task_ids": [],
+            },
+        )
+        self.assertIn(
+            "Task coverage: 1/unknown recorded",
+            inspector.render_text(inspector.build_view("interview-042", [record])),
+        )
+
+    def test_one_run_id_cannot_mix_dag_identities(self):
+        records = [
+            sample_record(task_id="validate_inputs"),
+            sample_record(task_id="validate_inputs", dag_id="ingest_pipeline_local"),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "records from multiple DAGs"):
+            inspector.build_view("interview-042", records)
 
     def test_s3_reader_validates_and_sorts_records(self):
         later = sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")

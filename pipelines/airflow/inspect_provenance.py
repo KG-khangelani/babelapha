@@ -16,6 +16,7 @@ DAGS_DIR = Path(__file__).resolve().parent / "dags"
 sys.path.insert(0, str(DAGS_DIR))
 
 from provenance import (  # noqa: E402
+    PIPELINE_TASK_CONTRACTS,
     _openlineage_execution_facet,
     _s3_client,
     _safe_segment,
@@ -265,6 +266,25 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
 
     runs = []
     for run_id, run_records in sorted(grouped.items()):
+        dag_ids = {record["run"]["dag_id"] for record in run_records}
+        if len(dag_ids) != 1:
+            raise ValueError(
+                f"Run {run_id!r} contains records from multiple DAGs: {sorted(dag_ids)}"
+            )
+        dag_id = next(iter(dag_ids))
+        expected_task_ids = list(PIPELINE_TASK_CONTRACTS.get(dag_id, ()))
+        recorded_set = {record["run"]["task_id"] for record in run_records}
+        if expected_task_ids:
+            unexpected_task_ids = sorted(recorded_set - set(expected_task_ids))
+            recorded_task_ids = [task_id for task_id in expected_task_ids if task_id in recorded_set]
+            recorded_task_ids.extend(unexpected_task_ids)
+            not_recorded_task_ids = [
+                task_id for task_id in expected_task_ids if task_id not in recorded_set
+            ]
+        else:
+            unexpected_task_ids = []
+            recorded_task_ids = sorted(recorded_set)
+            not_recorded_task_ids = []
         ordered = sorted(
             run_records,
             key=lambda record: (
@@ -276,9 +296,17 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
         runs.append(
             {
                 "run_id": run_id,
+                "dag_id": dag_id,
                 "statuses_observed": sorted({record["run"]["status"] for record in ordered}),
                 "first_recorded_at": ordered[0]["recorded_at"],
                 "last_recorded_at": ordered[-1]["recorded_at"],
+                "task_coverage": {
+                    "contract_known": bool(expected_task_ids),
+                    "expected_task_ids": expected_task_ids,
+                    "recorded_task_ids": recorded_task_ids,
+                    "not_recorded_task_ids": not_recorded_task_ids,
+                    "unexpected_task_ids": unexpected_task_ids,
+                },
                 "records": ordered,
             }
         )
@@ -339,14 +367,27 @@ def render_text(view: dict) -> str:
         ),
     ]
     for run in view["runs"]:
+        coverage = run["task_coverage"]
+        coverage_denominator = (
+            str(len(coverage["expected_task_ids"])) if coverage["contract_known"] else "unknown"
+        )
         lines.extend(
             [
                 "",
                 f"Run: {run['run_id']}",
+                f"DAG: {run['dag_id']}",
                 f"Observed statuses: {', '.join(run['statuses_observed'])}",
                 f"Evidence window: {run['first_recorded_at']} -> {run['last_recorded_at']}",
+                f"Task coverage: {len(coverage['recorded_task_ids'])}/{coverage_denominator} recorded",
             ]
         )
+        if coverage["not_recorded_task_ids"]:
+            lines.append(
+                "No immutable execution record: "
+                + ", ".join(coverage["not_recorded_task_ids"])
+            )
+        if coverage["unexpected_task_ids"]:
+            lines.append("Unexpected task records: " + ", ".join(coverage["unexpected_task_ids"]))
         for record in run["records"]:
             task = record["run"]
             decision = record["decision"]

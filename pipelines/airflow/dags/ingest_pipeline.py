@@ -18,6 +18,7 @@ from provenance import (
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
+    required_upstream_task_ids,
 )
 
 
@@ -370,15 +371,7 @@ PY
         locations = assert_success_manifests(
             object_id=inputs["object_id"],
             run_id=dag_run.run_id,
-            task_ids=[
-                "validate_inputs",
-                "inspect_source",
-                "virus_scan",
-                "validate_media",
-                "transcode",
-                "verify_outputs",
-                "mark_complete",
-            ],
+            task_ids=required_upstream_task_ids("ingest_pipeline"),
             endpoint_url=PROVENANCE_S3_ENDPOINT,
             bucket=PROVENANCE_S3_BUCKET,
         )
