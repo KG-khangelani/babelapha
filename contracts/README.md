@@ -59,3 +59,8 @@ could not be hashed is `UNVERIFIED`. Likewise, a container is
 `VERIFIED_DIGEST` only when the runtime image is identified by a registry
 digest. A tag alone is recorded as `CONFIGURED_REF_ONLY` and must never be
 presented as exact reproducibility.
+
+The contract regression tests freeze both the commit-pinned emitted URLs and
+the exact checked-in schema bytes. Changing a contract therefore requires a
+new schema version and immutable contract commit; editing a v1 file in place
+fails validation.

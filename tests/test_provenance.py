@@ -722,6 +722,44 @@ class ProvenanceContractTests(unittest.TestCase):
         schema = json.loads((ROOT / "contracts" / "provenance-manifest-v1.schema.json").read_text())
         self.assertEqual(schema["properties"]["schema_version"]["const"], provenance.SCHEMA_VERSION)
 
+    def test_emitted_contract_urls_and_checked_in_bytes_are_pinned(self):
+        # A contract edit requires a new version and immutable URL; never refresh
+        # these hashes while leaving emitted schema identities unchanged.
+        contracts = (
+            (
+                provenance.MANIFEST_SCHEMA_URI,
+                provenance.CONTRACTS_COMMIT,
+                "provenance-manifest-v1.schema.json",
+                "c55ebb00a81f42c33e8554bd28bf7d2b1201dcc1a0b84fd5c8965df9f1c4db74",
+            ),
+            (
+                provenance.OPENLINEAGE_FACET_SCHEMA_URI,
+                provenance.CONTRACTS_COMMIT,
+                "openlineage-babelapha-execution-run-facet-v2.schema.json",
+                "1b1ad4780263ed1ab00f5452aa6bf2ad0c789df4990f168a43600aacaee56749",
+            ),
+            (
+                provenance.OPENLINEAGE_ARTIFACT_FACET_SCHEMA_URI,
+                provenance.CONTRACTS_COMMIT,
+                "openlineage-babelapha-artifact-dataset-facet-v1.schema.json",
+                "0e8fa82f127b3a3414fde08ee692dbff1daddf5fa213c45d07a59b58675f5653",
+            ),
+            (
+                provenance.OPENLINEAGE_RECEIPT_SCHEMA_URI,
+                provenance.DELIVERY_CONTRACTS_COMMIT,
+                "openlineage-delivery-receipt-v1.schema.json",
+                "9c6133e488fca011ac41d98dfd7dd4a000dd58c33f1c504b16cd395771686a69",
+            ),
+        )
+        for uri, commit, filename, expected_sha256 in contracts:
+            relative_path = f"contracts/{filename}"
+            with self.subTest(contract=filename):
+                self.assertIn(f"/{commit}/{relative_path}", uri)
+                self.assertEqual(
+                    hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest(),
+                    expected_sha256,
+                )
+
     @unittest.skipIf(jsonschema is None, "jsonschema is not installed in the lightweight host environment")
     def test_generated_manifest_conforms_to_published_json_schema(self):
         schema = json.loads((ROOT / "contracts" / "provenance-manifest-v1.schema.json").read_text())
