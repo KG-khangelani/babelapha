@@ -19,6 +19,7 @@ from provenance import (
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
+    require_digest_pinned_images,
     required_upstream_task_ids,
 )
 
@@ -112,6 +113,9 @@ def ingest_pipeline_v2():
         filename = str(conf.get("filename", "")).strip()
         if not object_id or not filename:
             raise ValueError(f"Missing required parameters: id={object_id}, filename={filename}")
+        require_digest_pinned_images(
+            {"BABELAPHA_DIAGNOSTIC_IMAGE": DIAGNOSTIC_IMAGE}
+        )
 
         pachyderm_commit = str(conf.get("pachyderm_commit", "")).strip() or None
         source = artifact(

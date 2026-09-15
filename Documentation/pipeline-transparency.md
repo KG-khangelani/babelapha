@@ -79,11 +79,13 @@ Container identity is deliberately honest:
 - a mutable tag such as `localhost/transcode:latest` produces
   `CONFIGURED_REF_ONLY`.
 
-The production DAG fails its first task before media processing when any scan,
-validation, or transcode pod image is not pinned directly in its Kubernetes
-image reference. A separate environment variable cannot upgrade a mutable pod
-tag to verified identity, because that would not prove which bytes Kubernetes
-actually pulled. Conflicting or malformed configured digests are rejected.
+Every Kubernetes DAG fails its first task before launching a pod when a
+configured image is not pinned directly in its Kubernetes image reference. For
+the production media DAG this covers scan, validation, and transcode; for the
+diagnostic DAG it covers its shared Python image. A separate environment
+variable cannot upgrade a mutable pod tag to verified identity, because that
+would not prove which bytes Kubernetes actually pulled. Conflicting or
+malformed configured digests are rejected.
 
 For production, set these variables to digest-pinned references:
 
@@ -125,9 +127,10 @@ non-secret values in the Airflow deployment configuration:
 | `OPENLINEAGE_NAMESPACE` | Stable environment name such as `babelapha-production` |
 | `BABELAPHA_*_IMAGE` | Registry references pinned with `@sha256:` |
 
-The sync job refuses a missing, short, or symbolic `BUILD_VCS_NUMBER`. Container
-references without a digest remain usable, but their manifests are explicitly
-marked `CONFIGURED_REF_ONLY` rather than exact.
+The sync job refuses a missing, short, or symbolic `BUILD_VCS_NUMBER`.
+Kubernetes DAGs refuse container references without a digest before launching
+a pod. The local DAG can still run without a known runtime digest, but its
+manifests are explicitly marked `CONFIGURED_REF_ONLY` rather than exact.
 
 The Pachyderm webhook contract also fails closed when a commit ID is missing.
 It copies that exact ID into `dag_run.conf.pachyderm_commit` and derives a stable

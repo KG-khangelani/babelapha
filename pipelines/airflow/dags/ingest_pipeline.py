@@ -15,10 +15,10 @@ from airflow.sdk import dag, get_current_context, task
 from provenance import (
     artifact,
     assert_success_manifests,
-    is_digest_pinned_image,
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
+    require_digest_pinned_images,
     required_upstream_task_ids,
 )
 
@@ -85,17 +85,13 @@ def _processing_env() -> dict[str, str]:
 
 
 def _require_digest_pinned_processing_images() -> None:
-    images = {
-        "BABELAPHA_SCAN_IMAGE": SCAN_IMAGE,
-        "BABELAPHA_VALIDATE_IMAGE": VALIDATE_IMAGE,
-        "BABELAPHA_TRANSCODE_IMAGE": TRANSCODE_IMAGE,
-    }
-    mutable = [f"{name}={image}" for name, image in images.items() if not is_digest_pinned_image(image)]
-    if mutable:
-        raise RuntimeError(
-            "Production processing images must be pinned in their Kubernetes references: "
-            + ", ".join(mutable)
-        )
+    require_digest_pinned_images(
+        {
+            "BABELAPHA_SCAN_IMAGE": SCAN_IMAGE,
+            "BABELAPHA_VALIDATE_IMAGE": VALIDATE_IMAGE,
+            "BABELAPHA_TRANSCODE_IMAGE": TRANSCODE_IMAGE,
+        }
+    )
 
 
 SOURCE_XCOM = r"""

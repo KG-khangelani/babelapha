@@ -79,6 +79,23 @@ class DagTransparencyContractTests(unittest.TestCase):
         self.assertIsNone(source["sha256"])
         self.assertEqual(source["version"]["pachyderm_commit"], "pach-42")
 
+    def test_v2_refuses_a_mutable_diagnostic_image(self):
+        validate = self.bag.dags["ingest_pipeline_v2"].task_dict["validate_inputs"].python_callable
+        context = {
+            "dag_run": SimpleNamespace(
+                conf={"id": "item-17", "filename": "clip.mp4", "pachyderm_commit": "pach-42"}
+            )
+        }
+        with mock.patch.dict(
+            validate.__globals__,
+            {
+                "get_current_context": lambda: context,
+                "DIAGNOSTIC_IMAGE": "registry/diagnostics:latest",
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "BABELAPHA_DIAGNOSTIC_IMAGE"):
+                validate()
+
     def test_production_dag_refuses_mutable_processing_images(self):
         validate = self.bag.dags["ingest_pipeline"].task_dict["validate_inputs"].python_callable
         context = {
@@ -158,6 +175,19 @@ class DagTransparencyContractTests(unittest.TestCase):
                 self.assertNotIn("No threats detected", script)
                 self.assertNotIn("Format OK", script)
                 self.assertNotIn("HLS+DASH generated", script)
+
+
+class KubernetesImageWiringTests(unittest.TestCase):
+    def test_compose_forwards_every_kubernetes_image_override(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        for name in (
+            "BABELAPHA_SCAN_IMAGE",
+            "BABELAPHA_VALIDATE_IMAGE",
+            "BABELAPHA_TRANSCODE_IMAGE",
+            "BABELAPHA_DIAGNOSTIC_IMAGE",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(f"{name}: ${{{name}:-", compose)
 
 
 if __name__ == "__main__":

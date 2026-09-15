@@ -288,6 +288,20 @@ def is_digest_pinned_image(image: str) -> bool:
     return image_ref_digest(image)[1] is not None
 
 
+def require_digest_pinned_images(images: dict[str, str]) -> None:
+    """Fail before a Kubernetes DAG launches any image that is not exact."""
+    mutable = [
+        f"{name}={image}"
+        for name, image in images.items()
+        if not is_digest_pinned_image(image)
+    ]
+    if mutable:
+        raise RuntimeError(
+            "Kubernetes images must be pinned in their configured references: "
+            + ", ".join(mutable)
+        )
+
+
 def _container_identity(image: str, explicit_digest: str | None = None) -> dict:
     image, embedded_digest = image_ref_digest(image)
     digest = explicit_digest
