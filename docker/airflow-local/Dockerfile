@@ -1,4 +1,4 @@
-FROM apache/airflow:3.1.1-python3.11
+FROM apache/airflow:3.3.1-python3.11
 
 USER root
 RUN apt-get update \
@@ -18,4 +18,5 @@ RUN printf '%s\n' \
 USER airflow
 
 RUN pip install --no-cache-dir \
-    "apache-airflow-providers-cncf-kubernetes==10.9.0"
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.11.txt" \
+    "apache-airflow-providers-cncf-kubernetes==10.21.0"

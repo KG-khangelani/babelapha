@@ -99,7 +99,7 @@ def ingest_pipeline():
     # ============================================================================
     download_from_pachyderm = _create_kpo_task(
         task_id="download_from_pachyderm",
-        image="amazon/aws-cli:latest",
+        image="amazon/aws-cli:2.36.44",
         name_prefix="dl",
         cmd_script="""
 S3_BUCKET="{{ task_instance.xcom_pull(task_ids='validate_inputs')['s3_bucket'] }}"
@@ -141,7 +141,7 @@ fi
     # ============================================================================
     virus_scan = _create_kpo_task(
         task_id="virus_scan",
-        image="clamav/clamav:latest",
+        image="clamav/clamav:1.5.4",
         name_prefix="scan",
         startup_timeout_seconds=300,  # ClamAV image takes time to start
         cmd_script="""
@@ -168,7 +168,7 @@ fi
     # ============================================================================
     validate_media = _create_kpo_task(
         task_id="validate_media",
-        image="jrottenberg/ffmpeg:latest",
+        image="jrottenberg/ffmpeg:8.0.3-ubuntu2404",
         name_prefix="val",
         cmd_script="""
 FILENAME="{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}"
@@ -191,7 +191,7 @@ fi
     # ============================================================================
     transcode = _create_kpo_task(
         task_id="transcode",
-        image="jrottenberg/ffmpeg:latest",
+        image="jrottenberg/ffmpeg:8.0.3-ubuntu2404",
         name_prefix="tc",
         cmd_script="""
 FILENAME="{{ task_instance.xcom_pull(task_ids='validate_inputs')['filename'] }}"
@@ -270,7 +270,7 @@ fi
     # ============================================================================
     upload_results = _create_kpo_task(
         task_id="upload_results",
-        image="amazon/aws-cli:latest",
+        image="amazon/aws-cli:2.36.44",
         name_prefix="up",
         cmd_script="""
 OBJECT_ID="{{ task_instance.xcom_pull(task_ids='validate_inputs')['object_id'] }}"

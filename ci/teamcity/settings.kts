@@ -81,7 +81,7 @@ object AirflowGitSync : BuildType({
                 commandArgs = """
                     --rm
                                 --network host
-                                alpine:latest
+ alpine:3.24.1
                                 ping -c 3 github.com
                 """.trimIndent()
             }

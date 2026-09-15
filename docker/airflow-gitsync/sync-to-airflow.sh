@@ -137,7 +137,7 @@ spec:
     restartPolicy: Never
     containers:
     - name: sync
-        image: alpine:3.19
+        image: alpine:3.24.1
         command: ['sh','-c','sleep 600']
         volumeMounts:
         - name: dags

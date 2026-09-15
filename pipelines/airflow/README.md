@@ -63,7 +63,7 @@ airflow dags trigger ingest_pipeline --conf '{"id": "demo-id", "filename": "samp
    ```bash
    python -m venv .venv
    source .venv/bin/activate
-   pip install "apache-airflow[celery]==2.9.1"
+pip install "apache-airflow[celery]==3.3.1" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.11.txt"
    ```
 
 2. Export the DAGs folder so Airflow can find the DAG:

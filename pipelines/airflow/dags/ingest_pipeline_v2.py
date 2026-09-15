@@ -73,7 +73,7 @@ def ingest_pipeline_v2():
         task_id="run_virus_scan",
         name="virus-scan-pod",
         namespace="airflow",
-        image="python:3.11-slim",
+        image="python:3.11.16-slim-bookworm",
         image_pull_policy="Always",
         cmds=["python3", "-c"],
         arguments=[
@@ -108,7 +108,7 @@ def ingest_pipeline_v2():
         task_id="run_media_validation",
         name="validate-media-pod",
         namespace="airflow",
-        image="python:3.11-slim",
+        image="python:3.11.16-slim-bookworm",
         image_pull_policy="Always",
         cmds=["python3", "-c"],
         arguments=[
@@ -143,7 +143,7 @@ def ingest_pipeline_v2():
         task_id="run_transcode",
         name="transcode-pod",
         namespace="airflow",
-        image="python:3.11-slim",
+        image="python:3.11.16-slim-bookworm",
         image_pull_policy="Always",
         cmds=["python3", "-c"],
         arguments=[
