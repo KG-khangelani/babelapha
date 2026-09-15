@@ -128,6 +128,32 @@ class ProvenanceContractTests(unittest.TestCase):
         with self.assertRaisesRegex(provenance.ManifestValidationError, "Pachyderm commit differs"):
             provenance.validate_manifest(mismatched_commit)
 
+    def test_pipeline_task_contract_is_self_identifying_and_tamper_evident(self):
+        contract = provenance.pipeline_task_contract("ingest_pipeline_local")
+        record = self.sample_manifest(parameters={"pipeline_task_contract": contract})
+
+        provenance.validate_manifest(record)
+        self.assertEqual(contract["dag_id"], record["run"]["dag_id"])
+        self.assertEqual(contract["task_ids"][-1], "verify_provenance")
+        self.assertEqual(len(contract["sha256"]), 64)
+
+        tampered = copy.deepcopy(record)
+        tampered["execution"]["parameters"]["pipeline_task_contract"]["task_ids"].insert(
+            -1, "unrecorded_new_stage"
+        )
+        with self.assertRaisesRegex(
+            provenance.ManifestValidationError,
+            "SHA-256 does not match",
+        ):
+            provenance.validate_manifest(tampered)
+
+        wrong_dag = copy.deepcopy(record)
+        wrong_dag["execution"]["parameters"]["pipeline_task_contract"]["dag_id"] = (
+            "ingest_pipeline"
+        )
+        with self.assertRaisesRegex(provenance.ManifestValidationError, "DAG differs"):
+            provenance.validate_manifest(wrong_dag)
+
     def test_kubernetes_task_never_inherits_the_airflow_runtime_digest(self):
         class TaskInstance:
             task_id = "run_virus_scan"
@@ -375,6 +401,10 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertEqual(
             record["execution"]["parameters"]["pachyderm_commit"],
             "pachyderm-commit-early",
+        )
+        self.assertEqual(
+            record["execution"]["parameters"]["pipeline_task_contract"],
+            provenance.pipeline_task_contract("ingest_pipeline_local"),
         )
         self.assertEqual(record["inputs"][0]["integrity"], "UNVERIFIED")
         self.assertEqual(

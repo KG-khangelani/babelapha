@@ -94,6 +94,7 @@ PIPELINE_TASK_CONTRACTS = {
         "verify_provenance",
     ),
 }
+PIPELINE_TASK_CONTRACT_VERSION = "1.0.0"
 
 
 class ManifestValidationError(ValueError):
@@ -109,6 +110,53 @@ def required_upstream_task_ids(dag_id: str) -> list[str]:
     if not task_ids or task_ids[-1] != "verify_provenance":
         raise ValueError(f"Pipeline task contract for DAG {dag_id!r} has no final provenance gate")
     return list(task_ids[:-1])
+
+
+def _pipeline_task_contract_sha256(contract: dict) -> str:
+    identity = {key: value for key, value in contract.items() if key != "sha256"}
+    body = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def pipeline_task_contract(dag_id: str) -> dict:
+    """Build the self-identifying task topology embedded in new run evidence."""
+    try:
+        task_ids = PIPELINE_TASK_CONTRACTS[dag_id]
+    except KeyError as exc:
+        raise ValueError(f"No pipeline task contract is registered for DAG {dag_id!r}") from exc
+    contract = {
+        "schema_version": PIPELINE_TASK_CONTRACT_VERSION,
+        "dag_id": dag_id,
+        "task_ids": list(task_ids),
+    }
+    contract["sha256"] = _pipeline_task_contract_sha256(contract)
+    return contract
+
+
+def _validate_pipeline_task_contract(contract: object, *, dag_id: str, task_id: str) -> None:
+    required = {"schema_version", "dag_id", "task_ids", "sha256"}
+    if not isinstance(contract, dict) or set(contract) != required:
+        raise ManifestValidationError("Pipeline task contract fields do not match the v1 contract")
+    if contract["schema_version"] != PIPELINE_TASK_CONTRACT_VERSION:
+        raise ManifestValidationError("Unsupported pipeline task contract version")
+    if contract["dag_id"] != dag_id:
+        raise ManifestValidationError("Pipeline task contract DAG differs from the manifest")
+    task_ids = contract["task_ids"]
+    if (
+        not isinstance(task_ids, list)
+        or not task_ids
+        or any(not isinstance(item, str) or not item.strip() for item in task_ids)
+        or len(task_ids) != len(set(task_ids))
+    ):
+        raise ManifestValidationError("Pipeline task contract requires unique, non-empty task IDs")
+    if task_ids[-1] != "verify_provenance":
+        raise ManifestValidationError("Pipeline task contract must end with verify_provenance")
+    if task_id not in task_ids:
+        raise ManifestValidationError("Manifest task is absent from its pipeline task contract")
+    if not isinstance(contract["sha256"], str) or not SHA256_RE.fullmatch(contract["sha256"]):
+        raise ManifestValidationError("Pipeline task contract SHA-256 is invalid")
+    if contract["sha256"] != _pipeline_task_contract_sha256(contract):
+        raise ManifestValidationError("Pipeline task contract SHA-256 does not match its contents")
 
 
 def media_type_for_uri(uri: str, reported: str | None = None) -> str | None:
@@ -436,6 +484,12 @@ def validate_manifest(record: dict) -> None:
     if not isinstance(execution["parameters"], dict):
         raise ManifestValidationError("Execution parameters must be an object")
     parameters = execution["parameters"]
+    if "pipeline_task_contract" in parameters:
+        _validate_pipeline_task_contract(
+            parameters["pipeline_task_contract"],
+            dag_id=run["dag_id"],
+            task_id=run["task_id"],
+        )
     if "pachyderm_commit" in parameters:
         parameter_commit = parameters["pachyderm_commit"]
         if parameter_commit is not None and (
@@ -1141,6 +1195,11 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             "object_id": object_id,
             "filename": filename,
             "pachyderm_commit": pachyderm_commit,
+            **(
+                {"pipeline_task_contract": pipeline_task_contract(dag_id)}
+                if dag_id in PIPELINE_TASK_CONTRACTS
+                else {}
+            ),
         },
         airflow_version=_package_version("apache-airflow"),
         airflow_log_url=getattr(ti, "log_url", None),

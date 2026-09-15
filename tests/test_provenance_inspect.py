@@ -43,6 +43,7 @@ def sample_record(
     status="SUCCEEDED",
     recorded_at="2026-09-15T08:00:00Z",
     dag_id="ingest_pipeline",
+    parameters=None,
 ):
     source = provenance.artifact(
         "s3://pachyderm/incoming/interview-042/interview.mp4",
@@ -75,6 +76,7 @@ def sample_record(
         code_sha256="c" * 64,
         container_image="registry/validate",
         container_digest="sha256:" + "d" * 64,
+        parameters=parameters,
         airflow_version="3.3.1",
     )
 
@@ -91,6 +93,7 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "Run: manual__run-42",
             "DAG: ingest_pipeline",
             "Task coverage: 2/8 recorded",
+            "Task contract: source=CURRENT_REGISTRY_FALLBACK evidence=FALLBACK",
             "No immutable execution record: validate_inputs, inspect_source, virus_scan, verify_outputs, mark_complete, verify_provenance",
             "[FAILED] stage=transcode task=transcode attempt=1",
             "decision=TASK_FAILED",
@@ -125,6 +128,11 @@ class ProvenanceInspectorTests(unittest.TestCase):
             run["task_coverage"],
             {
                 "contract_known": True,
+                "contract_source": "CURRENT_REGISTRY_FALLBACK",
+                "contract_sha256": provenance.pipeline_task_contract("ingest_pipeline")["sha256"],
+                "contract_evidence_status": "FALLBACK",
+                "records_with_embedded_contract": 0,
+                "record_count": 3,
                 "expected_task_ids": list(provenance.PIPELINE_TASK_CONTRACTS["ingest_pipeline"]),
                 "recorded_task_ids": ["validate_inputs", "inspect_source"],
                 "not_recorded_task_ids": [
@@ -163,6 +171,11 @@ class ProvenanceInspectorTests(unittest.TestCase):
             run["task_coverage"],
             {
                 "contract_known": False,
+                "contract_source": "UNKNOWN",
+                "contract_sha256": None,
+                "contract_evidence_status": "UNKNOWN",
+                "records_with_embedded_contract": 0,
+                "record_count": 1,
                 "expected_task_ids": [],
                 "recorded_task_ids": ["custom_stage"],
                 "not_recorded_task_ids": [],
@@ -182,6 +195,45 @@ class ProvenanceInspectorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "records from multiple DAGs"):
             inspector.build_view("interview-042", records)
+
+    def test_embedded_contract_preserves_historical_topology_after_registry_drift(self):
+        historical_contract = {
+            "schema_version": provenance.PIPELINE_TASK_CONTRACT_VERSION,
+            "dag_id": "ingest_pipeline",
+            "task_ids": ["legacy_stage", "verify_provenance"],
+        }
+        historical_contract["sha256"] = provenance._pipeline_task_contract_sha256(
+            historical_contract
+        )
+        record = sample_record(
+            task_id="legacy_stage",
+            parameters={"pipeline_task_contract": historical_contract},
+        )
+
+        coverage = inspector.build_view("interview-042", [record])["runs"][0]["task_coverage"]
+
+        self.assertEqual(coverage["contract_source"], "MANIFEST_EMBEDDED")
+        self.assertEqual(coverage["contract_evidence_status"], "COMPLETE")
+        self.assertEqual(coverage["contract_sha256"], historical_contract["sha256"])
+        self.assertEqual(coverage["expected_task_ids"], ["legacy_stage", "verify_provenance"])
+        self.assertEqual(coverage["not_recorded_task_ids"], ["verify_provenance"])
+
+    def test_partially_embedded_contract_is_explicit(self):
+        contract = provenance.pipeline_task_contract("ingest_pipeline")
+        records = [
+            sample_record(
+                task_id="validate_inputs",
+                parameters={"pipeline_task_contract": contract},
+            ),
+            sample_record(task_id="inspect_source", recorded_at="2026-09-15T08:01:00Z"),
+        ]
+
+        coverage = inspector.build_view("interview-042", records)["runs"][0]["task_coverage"]
+
+        self.assertEqual(coverage["contract_source"], "MANIFEST_EMBEDDED")
+        self.assertEqual(coverage["contract_evidence_status"], "PARTIAL")
+        self.assertEqual(coverage["records_with_embedded_contract"], 1)
+        self.assertEqual(coverage["record_count"], 2)
 
     def test_s3_reader_validates_and_sorts_records(self):
         later = sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")

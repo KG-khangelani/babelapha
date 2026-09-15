@@ -23,6 +23,7 @@ from provenance import (  # noqa: E402
     canonical_json_bytes,
     manifest_prefix,
     openlineage_event_key,
+    pipeline_task_contract,
     validate_manifest,
     validate_openlineage_event_for_manifest,
     validate_openlineage_receipt,
@@ -272,7 +273,39 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                 f"Run {run_id!r} contains records from multiple DAGs: {sorted(dag_ids)}"
             )
         dag_id = next(iter(dag_ids))
-        expected_task_ids = list(PIPELINE_TASK_CONTRACTS.get(dag_id, ()))
+        embedded_contracts = {
+            json.dumps(contract, sort_keys=True, separators=(",", ":")): contract
+            for record in run_records
+            if (
+                contract := record["execution"]["parameters"].get("pipeline_task_contract")
+            )
+            is not None
+        }
+        if len(embedded_contracts) > 1:
+            raise ValueError(f"Run {run_id!r} contains conflicting pipeline task contracts")
+        embedded_record_count = sum(
+            "pipeline_task_contract" in record["execution"]["parameters"]
+            for record in run_records
+        )
+        if embedded_contracts:
+            contract = next(iter(embedded_contracts.values()))
+            expected_task_ids = list(contract["task_ids"])
+            contract_source = "MANIFEST_EMBEDDED"
+            contract_sha256 = contract["sha256"]
+            contract_evidence_status = (
+                "COMPLETE" if embedded_record_count == len(run_records) else "PARTIAL"
+            )
+        elif dag_id in PIPELINE_TASK_CONTRACTS:
+            contract = pipeline_task_contract(dag_id)
+            expected_task_ids = list(contract["task_ids"])
+            contract_source = "CURRENT_REGISTRY_FALLBACK"
+            contract_sha256 = contract["sha256"]
+            contract_evidence_status = "FALLBACK"
+        else:
+            expected_task_ids = []
+            contract_source = "UNKNOWN"
+            contract_sha256 = None
+            contract_evidence_status = "UNKNOWN"
         recorded_set = {record["run"]["task_id"] for record in run_records}
         if expected_task_ids:
             unexpected_task_ids = sorted(recorded_set - set(expected_task_ids))
@@ -302,6 +335,11 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                 "last_recorded_at": ordered[-1]["recorded_at"],
                 "task_coverage": {
                     "contract_known": bool(expected_task_ids),
+                    "contract_source": contract_source,
+                    "contract_sha256": contract_sha256,
+                    "contract_evidence_status": contract_evidence_status,
+                    "records_with_embedded_contract": embedded_record_count,
+                    "record_count": len(run_records),
                     "expected_task_ids": expected_task_ids,
                     "recorded_task_ids": recorded_task_ids,
                     "not_recorded_task_ids": not_recorded_task_ids,
@@ -379,6 +417,11 @@ def render_text(view: dict) -> str:
                 f"Observed statuses: {', '.join(run['statuses_observed'])}",
                 f"Evidence window: {run['first_recorded_at']} -> {run['last_recorded_at']}",
                 f"Task coverage: {len(coverage['recorded_task_ids'])}/{coverage_denominator} recorded",
+                "Task contract: "
+                f"source={coverage['contract_source']} "
+                f"evidence={coverage['contract_evidence_status']} "
+                f"sha256={_value(coverage['contract_sha256'])} "
+                f"embedded={coverage['records_with_embedded_contract']}/{coverage['record_count']}",
             ]
         )
         if coverage["not_recorded_task_ids"]:
