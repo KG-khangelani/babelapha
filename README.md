@@ -130,6 +130,10 @@ s3://pachyderm/output/<id>/dash/*
    `s3://pachyderm/provenance/<id>/<run-id>/` and inspect the lineage graph at
    <http://localhost:3001>.
 
+   ```powershell
+   docker compose run --rm provenance-inspect --object-id <id>
+   ```
+
 Alternative event-driven path (closer to production):
 
 1. Send a webhook payload:

@@ -13,6 +13,12 @@ SOURCE_DIR=${SOURCE_DIR:-pipelines/airflow/dags}
 BUILD_NUMBER=${BUILD_NUMBER:-1}
 BUILD_VCS_NUMBER=${BUILD_VCS_NUMBER:-unknown}
 
+if [[ ! "${BUILD_VCS_NUMBER,,}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "✗ BUILD_VCS_NUMBER must be the full 40- or 64-character Git commit SHA."
+    exit 1
+fi
+DEPLOYED_GIT_SHA=${BUILD_VCS_NUMBER,,}
+
 # Configure kubectl credentials
 if [ -d "/var/run/secrets/kubernetes.io/serviceaccount" ]; then
     echo "Using in-cluster service account"
@@ -161,6 +167,12 @@ fi
 # Sync DAG files
 echo ''
 echo "Syncing DAGs to ${DAGS_FOLDER} (mode: ${COPY_TARGET_MODE})..."
+IDENTITY_FILE=$(mktemp)
+printf '%s\n' "${DEPLOYED_GIT_SHA}" > "${IDENTITY_FILE}"
+kubectl exec -n ${AIRFLOW_NAMESPACE} ${COPY_POD_NAME} -- mkdir -p ${DAGS_FOLDER} || true
+kubectl cp "${IDENTITY_FILE}" "${AIRFLOW_NAMESPACE}/${COPY_POD_NAME}:${DAGS_FOLDER}/.babelapha-git-sha"
+rm -f "${IDENTITY_FILE}"
+echo "  → Recorded deployed Git identity: ${DEPLOYED_GIT_SHA}"
 DAG_COUNT=0
 for dag_file in "${SOURCE_PATH}"/*.py; do
     if [ -f "${dag_file}" ]; then

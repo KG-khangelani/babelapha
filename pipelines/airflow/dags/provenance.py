@@ -442,10 +442,10 @@ def build_openlineage_event(record: dict) -> dict:
     }
 
 
-def emit_openlineage(record: dict, *, url: str | None = None, timeout: float = 5.0) -> None:
+def emit_openlineage(record: dict, *, url: str | None = None, timeout: float = 5.0) -> bool:
     endpoint = (url or os.environ.get("OPENLINEAGE_URL", "")).rstrip("/")
     if not endpoint or os.environ.get("OPENLINEAGE_DISABLED", "").lower() in {"1", "true", "yes"}:
-        return
+        return False
     path = os.environ.get("OPENLINEAGE_ENDPOINT", "/api/v1/lineage")
     target = endpoint + "/" + path.lstrip("/")
     request = urllib.request.Request(
@@ -457,6 +457,7 @@ def emit_openlineage(record: dict, *, url: str | None = None, timeout: float = 5
     with urllib.request.urlopen(request, timeout=timeout) as response:
         if response.status >= 300:
             raise RuntimeError(f"OpenLineage endpoint returned HTTP {response.status}")
+    return True
 
 
 def _package_version(name: str) -> str | None:
@@ -476,10 +477,17 @@ def _dag_code_identity(context: dict) -> tuple[str, str | None]:
         return str(path), None
 
 
-def _git_commit() -> str | None:
+def _git_commit(identity_file: str | Path | None = None) -> str | None:
     configured = os.environ.get("BABELAPHA_GIT_SHA")
     if configured and GIT_SHA_RE.fullmatch(configured.strip().lower()):
         return configured.strip().lower()
+    deployed_identity = Path(identity_file) if identity_file else Path(__file__).with_name(".babelapha-git-sha")
+    try:
+        deployed_commit = deployed_identity.read_text(encoding="utf-8").strip().lower()
+        if GIT_SHA_RE.fullmatch(deployed_commit):
+            return deployed_commit
+    except OSError:
+        pass
     try:
         return subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -598,8 +606,10 @@ def emit_airflow_manifest(context: dict, status: str) -> None:
         record = build_airflow_manifest(context, status)
         location = persist_manifest(record)
         print(f"[provenance] Stored immutable record: {location}")
-        emit_openlineage(record)
-        print(f"[provenance] Emitted OpenLineage event: {record['manifest_id']}")
+        if emit_openlineage(record):
+            print(f"[provenance] Emitted OpenLineage event: {record['manifest_id']}")
+        else:
+            print("[provenance] OpenLineage emission skipped: endpoint disabled or not configured")
     except Exception as exc:
         # Callback failures must be loud without masking the task's original state.
         print(f"[provenance] ERROR: {type(exc).__name__}: {exc}")

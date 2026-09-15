@@ -1,12 +1,20 @@
 # file: docker/clamav/Dockerfile
 FROM docker.io/clamav/clamav:1.5.4
-RUN apk add --no-cache python3 py3-pip curl jq awscli
+RUN apk add --no-cache python3 py3-pip curl jq \
+    && pip3 install --no-cache-dir --break-system-packages awscli==1.46.1
 
-# Install pachctl for Pachyderm operations
-RUN curl -L -o /usr/local/bin/pachctl https://github.com/pachyderm/pachyderm/releases/download/v2.12.2/pachctl_2.12.2_linux_amd64 && chmod +x /usr/local/bin/pachctl
+# Install the published pachctl release archive and fail if the asset is missing.
+ARG PACHCTL_VERSION=2.12.2
+ARG PACHCTL_SHA256=843a4e18288225e94f72531a7037dc00c178a2288a29798fefe9b8f03e686e22
+RUN curl -fsSL -o /tmp/pachctl.tar.gz \
+        "https://github.com/pachyderm/pachyderm/releases/download/v${PACHCTL_VERSION}/pachctl_${PACHCTL_VERSION}_linux_amd64.tar.gz" \
+    && echo "${PACHCTL_SHA256}  /tmp/pachctl.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/pachctl.tar.gz --strip-components=1 -C /usr/local/bin \
+    && chmod +x /usr/local/bin/pachctl \
+    && rm /tmp/pachctl.tar.gz
 
-COPY utils/ /app/utils/
-COPY pfs_move.py /app/pfs_move.py
-COPY scan.py /app/scan.py
+COPY docker/utils/ /app/utils/
+COPY docker/utils/pfs_move.py /app/pfs_move.py
+COPY docker/clamav/scan.py /app/scan.py
 WORKDIR /app
 ENTRYPOINT ["python3","/app/scan.py"]

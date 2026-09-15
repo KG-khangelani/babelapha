@@ -81,7 +81,32 @@ For local Airflow, inject the result of `docker image inspect` as
 `BABELAPHA_RUNTIME_IMAGE_DIGEST` when exact container reproduction is required.
 Set `BABELAPHA_GIT_SHA` to the full 40- or 64-character commit SHA. Short or
 symbolic refs are not accepted as exact identities. The DAG-file SHA-256 remains
-exact even in an uncommitted local working tree.
+exact even in an uncommitted local working tree. The production DAG sync also
+writes the validated CI commit to `.babelapha-git-sha` beside the deployed DAGs,
+so a copied DAG retains its exact Git identity even when the Airflow pod does
+not contain the repository metadata.
+
+## Production runtime wiring
+
+The Airflow scheduler, workers, triggerer, and webserver must receive the same
+runtime configuration. Keep credentials in Kubernetes Secrets and the
+non-secret values in the Airflow deployment configuration:
+
+| Variable | Production value |
+|---|---|
+| `S3_BUCKET`, `MINIO_ENDPOINT` | Source/output bucket and its S3-compatible endpoint |
+| `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Kubernetes Secret required by the production DAG |
+| `PROVENANCE_S3_BUCKET` | Versioned bucket containing the canonical records |
+| `PROVENANCE_S3_ENDPOINT` | Pachyderm/MinIO S3-compatible API endpoint |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Optional separate Secret with write access to the provenance prefix |
+| `OPENLINEAGE_URL` | Marquez API base URL |
+| `OPENLINEAGE_ENDPOINT` | `/api/v1/lineage` |
+| `OPENLINEAGE_NAMESPACE` | Stable environment name such as `babelapha-production` |
+| `BABELAPHA_*_IMAGE` | Registry references pinned with `@sha256:` |
+
+The sync job refuses a missing, short, or symbolic `BUILD_VCS_NUMBER`. Container
+references without a digest remain usable, but their manifests are explicitly
+marked `CONFIGURED_REF_ONLY` rather than exact.
 
 ## OpenLineage and Marquez
 
@@ -98,6 +123,21 @@ The Compose stack exposes:
 - MinIO console: <http://localhost:9001>
 - Marquez API: <http://localhost:5000>
 - Marquez lineage UI: <http://localhost:3001>
+
+Select one media item and inspect every recorded run, stage decision, failure,
+artifact hash, storage version, Pachyderm commit, Git commit, DAG hash, and
+container digest with:
+
+```powershell
+docker compose run --rm provenance-inspect --object-id <object-id>
+```
+
+Restrict the view to one Airflow run or return machine-readable JSON:
+
+```powershell
+docker compose run --rm provenance-inspect --object-id <object-id> --run-id <run-id>
+docker compose run --rm provenance-inspect --object-id <object-id> --format json
+```
 
 Run the contract tests and configuration check with:
 

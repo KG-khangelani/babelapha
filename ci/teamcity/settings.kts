@@ -111,6 +111,9 @@ object AirflowGitSync : BuildType({
         vcs {
             triggerRules = """
                 +:pipelines/airflow/dags/**
+                +:pipelines/airflow/inspect_provenance.py
+                +:contracts/**
+                +:tests/**
                 +:docker/airflow-gitsync/**
             """.trimIndent()
             branchFilter = "+:refs/heads/main"
@@ -141,6 +144,7 @@ object MediaPipelineDockerImages : BuildType({
                 source = file {
                     path = "docker/clamav/dockerfile"
                 }
+                contextDir = "."
                 namesAndTags = "clamav:%build.number%"
                 commandArgs = "--pull"
             }
@@ -152,6 +156,7 @@ object MediaPipelineDockerImages : BuildType({
                 source = file {
                     path = "docker/validate/dockerfile"
                 }
+                contextDir = "."
                 namesAndTags = "validate:%build.number%"
                 commandArgs = "--pull"
             }
@@ -163,6 +168,7 @@ object MediaPipelineDockerImages : BuildType({
                 source = file {
                     path = "docker/transcode/dockerfile"
                 }
+                contextDir = "."
                 namesAndTags = "transcode:%build.number%"
                 commandArgs = "--pull"
             }

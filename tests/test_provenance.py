@@ -84,6 +84,13 @@ class ProvenanceContractTests(unittest.TestCase):
         with self.assertRaises(provenance.ManifestValidationError):
             self.sample_manifest(git_commit="local-working-tree")
 
+    def test_deployed_git_identity_file_preserves_exact_synced_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            identity_file = Path(directory) / ".babelapha-git-sha"
+            identity_file.write_text("A" * 40 + "\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(provenance._git_commit(identity_file), "a" * 40)
+
     def test_persistence_is_atomically_append_only_and_idempotent(self):
         class PreconditionFailed(Exception):
             response = {
@@ -175,6 +182,10 @@ class ProvenanceContractTests(unittest.TestCase):
             record["links"]["manifest"],
         )
         self.assertEqual(event["outputs"][0]["namespace"], "s3://pachyderm")
+
+    def test_openlineage_skip_is_reported_instead_of_claimed_as_emitted(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(provenance.emit_openlineage(self.sample_manifest()))
 
     def test_contract_schema_is_valid_json_and_matches_runtime_version(self):
         schema = json.loads((ROOT / "contracts" / "provenance-manifest-v1.schema.json").read_text())

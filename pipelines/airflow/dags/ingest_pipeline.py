@@ -22,9 +22,11 @@ from provenance import (
 
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio.minio-tenant.svc.cluster.local:80")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "pachyderm")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "pachyderm-secret-key-123456789")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "")
 S3_BUCKET = os.environ.get("S3_BUCKET", "pachyderm")
+PROVENANCE_S3_ENDPOINT = os.environ.get("PROVENANCE_S3_ENDPOINT", MINIO_ENDPOINT)
+PROVENANCE_S3_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET", S3_BUCKET)
 
 SCAN_IMAGE = os.environ.get("BABELAPHA_SCAN_IMAGE", "localhost/clamav:latest")
 VALIDATE_IMAGE = os.environ.get("BABELAPHA_VALIDATE_IMAGE", "localhost/validate:latest")
@@ -117,6 +119,8 @@ def ingest_pipeline():
         filename = str(conf.get("filename", "")).strip()
         if not object_id or not filename:
             raise ValueError(f"Missing required parameters: id={object_id}, filename={filename}")
+        if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
+            raise RuntimeError("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be injected by the deployment")
         input_key = f"incoming/{object_id}/{filename}"
         return {
             "object_id": object_id,
@@ -368,8 +372,8 @@ PY
                 "verify_outputs",
                 "mark_complete",
             ],
-            endpoint_url=MINIO_ENDPOINT,
-            bucket=S3_BUCKET,
+            endpoint_url=PROVENANCE_S3_ENDPOINT,
+            bucket=PROVENANCE_S3_BUCKET,
         )
         inputs["provenance_stage"] = "provenance_verified"
         inputs["provenance_decision"] = {
