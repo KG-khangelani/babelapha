@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.4.0",
-    "description": "Read-only discovery and validated views over canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.5.0",
+    "description": "Read-only discovery and validated views over storage-bound canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -167,7 +167,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.4.0"},
+          "api_version": {"const": "1.5.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -177,7 +177,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.4.0"},
+          "api_version": {"const": "1.5.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -194,7 +194,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.4.0"},
+          "api_version": {"const": "1.5.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -269,7 +269,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.4.0"},
+          "api_version": {"const": "1.5.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
         }
       },
@@ -444,7 +444,7 @@
       "StageAttempt": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["manifest_id", "attempt", "status", "stage", "recorded_at", "decision", "manifest_uri", "openlineage"],
+        "required": ["manifest_id", "attempt", "status", "stage", "recorded_at", "decision", "manifest_uri", "manifest_sha256", "openlineage"],
         "properties": {
           "manifest_id": {"type": "string", "format": "uuid"},
           "attempt": {"type": "integer", "minimum": 1},
@@ -453,6 +453,7 @@
           "recorded_at": {"type": "string", "format": "date-time"},
           "decision": {"$ref": "#/components/schemas/StageDecision"},
           "manifest_uri": {"type": "string", "minLength": 1},
+          "manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
           "openlineage": {"$ref": "#/components/schemas/StageOpenLineage"}
         }
       },
@@ -467,14 +468,7 @@
         }
       },
       "StageOpenLineage": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["state", "integrity", "event_sha256"],
-        "properties": {
-          "state": {"enum": ["NOT_CHECKED", "MISSING_OUTBOX", "PENDING", "DELIVERED", "ORPHANED_RECEIPT", "INTEGRITY_ERROR"]},
-          "integrity": {"enum": ["NOT_CHECKED", "VERIFIED", "FAILED"]},
-          "event_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
-        }
+        "$ref": "#/components/schemas/DeliveryState"
       },
       "TaskCoverage": {
         "type": "object",

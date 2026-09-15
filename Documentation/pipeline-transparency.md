@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.4.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.5.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -237,6 +237,15 @@ default; local origins can be explicitly allowlisted with the comma-separated
 `PROVENANCE_API_ALLOWED_ORIGINS` value. This Compose service is a development
 read boundary, not an internet security perimeter; add authentication, rate
 limiting, and deployment-specific authorization before public exposure.
+
+The reader binds every accepted manifest to its physical evidence location. It
+requires the stored bytes to use the canonical serialization, recomputes the
+object key from the manifest's object, run, task, attempt, and status identity,
+and requires the manifest self-link to equal that exact `s3://` URI. The stage
+ledger exposes a SHA-256 over those canonical bytes. Its per-attempt OpenLineage
+object contains the complete outbox URI, event hash, receipt URI, endpoint,
+HTTP status, delivery time, and integrity error, so a consumer does not have to
+perform an opaque secondary join to locate the underlying evidence.
 
 The API runs in its own non-root image rather than inheriting the Airflow
 runtime. Its Python base is digest-pinned, every Python dependency is version

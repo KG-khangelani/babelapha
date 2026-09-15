@@ -170,7 +170,11 @@ s3://pachyderm/output/<id>/dash/*
    `run_identity` is returned only when every stage agrees on the common
    filename, Pachyderm, Git, DAG, and orchestrator facts. First-class
    `artifact_evidence` nodes group every input/output occurrence by URI and
-   reject competing hashes or storage versions.
+   reject competing hashes or storage versions. Every recorded stage also
+   exposes the exact manifest URI and SHA-256 together with the complete queued
+   OpenLineage and delivery-receipt evidence. Reads reject a manifest whose
+   canonical bytes, declared identity, or self-link does not match its immutable
+   S3 object key.
 
 Alternative event-driven path (closer to production):
 

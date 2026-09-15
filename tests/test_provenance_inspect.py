@@ -1,5 +1,6 @@
 import importlib.util
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -181,6 +182,10 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "code=/opt/airflow/dags/ingest_pipeline.py sha256=" + "c" * 64,
             "bundle_sha256=" + "e" * 64,
             "container=registry/validate digest=sha256:" + "d" * 64,
+            "manifest="
+            + records[0]["links"]["manifest"]
+            + " sha256="
+            + hashlib.sha256(provenance.canonical_json_bytes(records[0])).hexdigest(),
         ):
             self.assertIn(expected, rendered)
 
@@ -548,12 +553,73 @@ class ProvenanceInspectorTests(unittest.TestCase):
 
             @staticmethod
             def get_object(*, Key, **_kwargs):
-                return {"Body": io.BytesIO(json.dumps(objects[Key]).encode())}
+                return {"Body": io.BytesIO(provenance.canonical_json_bytes(objects[Key]))}
 
         with mock.patch.object(inspector, "_s3_client", return_value=Client()):
             records = inspector.read_records(object_id="interview-042", run_id="manual__run-42")
 
         self.assertEqual([record["run"]["task_id"] for record in records], ["validate_media", "transcode"])
+
+    def test_s3_reader_binds_manifest_bytes_identity_and_link_to_the_object_key(self):
+        record = sample_record()
+        canonical_key = provenance.manifest_key(record)
+        cases = (
+            (
+                "noncanonical bytes",
+                canonical_key,
+                json.dumps(record).encode(),
+                "bytes are not canonical",
+            ),
+            (
+                "misplaced identity",
+                canonical_key.replace("validate_media", "different_task"),
+                provenance.canonical_json_bytes(record),
+                "identity does not match",
+            ),
+            (
+                "false self-link",
+                canonical_key,
+                None,
+                "link does not match",
+            ),
+        )
+        for label, key, body, error in cases:
+            with self.subTest(label=label):
+                candidate = copy.deepcopy(record)
+                if label == "false self-link":
+                    candidate["links"]["manifest"] = "s3://pachyderm/provenance/elsewhere.json"
+                    body = provenance.canonical_json_bytes(candidate)
+                client = MemoryS3()
+                client.objects[key] = body
+                with (
+                    mock.patch.object(inspector, "_s3_client", return_value=client),
+                    self.assertRaisesRegex(ValueError, error),
+                ):
+                    inspector.read_records(object_id="interview-042")
+
+    def test_stage_attempt_exposes_exact_manifest_and_lineage_evidence(self):
+        record = sample_record()
+        delivery = {
+            "state": "DELIVERED",
+            "integrity": "VERIFIED",
+            "outbox_uri": "s3://pachyderm/openlineage/outbox/event.json",
+            "event_sha256": "f" * 64,
+            "receipt_uri": "s3://pachyderm/openlineage/delivered/event.json",
+            "endpoint": "http://marquez:5000/api/v1/lineage",
+            "http_status": 201,
+            "delivered_at": "2026-09-15T08:00:01Z",
+            "error": None,
+        }
+
+        attempt = inspector._stage_attempt(record, delivery)
+
+        self.assertEqual(
+            attempt["manifest_sha256"],
+            hashlib.sha256(provenance.canonical_json_bytes(record)).hexdigest(),
+        )
+        self.assertEqual(attempt["manifest_uri"], record["links"]["manifest"])
+        self.assertEqual(attempt["openlineage"], delivery)
+        self.assertIsNot(attempt["openlineage"], delivery)
 
     def test_media_view_joins_delivered_and_pending_openlineage_evidence(self):
         client = MemoryS3()

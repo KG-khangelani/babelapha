@@ -22,6 +22,7 @@ from provenance import (  # noqa: E402
     _s3_client,
     _safe_segment,
     canonical_json_bytes,
+    manifest_key,
     manifest_prefix,
     openlineage_event_key,
     pipeline_task_contract,
@@ -105,6 +106,13 @@ def read_records(
                 raise ValueError(f"Object prefix contains a record for {record['object']['id']!r}: {key}")
             if run_id and record["run"]["id"] != run_id:
                 raise ValueError(f"Run prefix contains a record for {record['run']['id']!r}: {key}")
+            if manifest_key(record) != key:
+                raise ValueError(f"Manifest identity does not match its immutable object key: {key}")
+            manifest_uri = f"s3://{bucket}/{key}"
+            if record["links"]["manifest"] != manifest_uri:
+                raise ValueError(f"Manifest link does not match its immutable object key: {key}")
+            if canonical_json_bytes(record) != body:
+                raise ValueError(f"Manifest bytes are not canonical: {key}")
             records.append(record)
     return sorted(
         records,
@@ -281,11 +289,8 @@ def _stage_attempt(record: dict, delivery: dict) -> dict:
         "recorded_at": record["recorded_at"],
         "decision": record["decision"],
         "manifest_uri": record["links"]["manifest"],
-        "openlineage": {
-            "state": delivery["state"],
-            "integrity": delivery["integrity"],
-            "event_sha256": delivery["event_sha256"],
-        },
+        "manifest_sha256": hashlib.sha256(canonical_json_bytes(record)).hexdigest(),
+        "openlineage": dict(delivery),
     }
 
 
@@ -811,7 +816,9 @@ def render_text(view: dict) -> str:
                     f"    decision={decision['reason_code']} outcome={decision['outcome']}",
                     f"    message={decision['message']}",
                     f"    timing={_value(task['started_at'])} -> {task['completed_at']} duration_ms={_value(task['duration_ms'])}",
-                    f"    manifest={record['links']['manifest']}",
+                    "    "
+                    f"manifest={record['links']['manifest']} "
+                    f"sha256={hashlib.sha256(canonical_json_bytes(record)).hexdigest()}",
                 ]
             )
             lines.extend(_artifact_lines("inputs", record["inputs"]))

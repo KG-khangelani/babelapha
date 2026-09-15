@@ -27,8 +27,12 @@ An outbox object without its matching delivery receipt is pending and can be
 replayed without rebuilding or changing the original event.
 
 `provenance-read-api-v1.openapi.json` versions the read-only explorer boundary.
-Version `1.4.0` adds opt-in, per-item catalog evidence summaries derived from
-the strict detail reader. The catalog can therefore expose readable items,
+Version `1.5.0` adds storage-bound manifest evidence to every stage attempt:
+the canonical manifest SHA-256 and full OpenLineage outbox/receipt identity are
+available alongside the decision. The reader rejects non-canonical bytes,
+misplaced manifests, and false manifest self-links. Version `1.4.0` added
+opt-in, per-item catalog evidence summaries derived from the strict detail
+reader. The catalog can therefore expose readable items,
 missing evidence, and integrity conflicts before selection without maintaining
 an independent status store. The boundary also provides an ordered
 stage-evidence ledger plus verified run-level and artifact-level identities.
