@@ -190,6 +190,7 @@ future explorer without giving a browser direct MinIO credentials:
 ```text
 GET /health
 GET /ready
+GET /api/v1/openapi.json
 GET /api/v1/media?limit=50&cursor=<opaque-token>
 GET /api/v1/media/<percent-encoded-object-id>?run_id=<run-id>
 ```

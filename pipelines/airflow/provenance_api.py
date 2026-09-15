@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
@@ -25,6 +26,12 @@ PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
 PROVENANCE_ENDPOINT = os.environ.get("PROVENANCE_S3_ENDPOINT") or os.environ.get(
     "MINIO_ENDPOINT"
 )
+OPENAPI_PATH = Path(
+    os.environ.get(
+        "PROVENANCE_API_OPENAPI_PATH",
+        str(Path(__file__).resolve().parents[2] / "contracts" / "provenance-read-api-v1.openapi.json"),
+    )
+)
 ALLOWED_ORIGINS = {
     origin.strip()
     for origin in os.environ.get("PROVENANCE_API_ALLOWED_ORIGINS", "").split(",")
@@ -39,6 +46,14 @@ class APIError(ValueError):
         super().__init__(message)
         self.status = status
         self.code = code
+
+
+def read_openapi_contract() -> dict:
+    """Read and minimally bind the published contract to this implementation."""
+    contract = json.loads(OPENAPI_PATH.read_text(encoding="utf-8"))
+    if contract.get("openapi") != "3.1.0" or contract.get("info", {}).get("version") != API_VERSION:
+        raise ValueError("OpenAPI contract version differs from the running API")
+    return contract
 
 
 def _validate_query(query: dict[str, list[str]], allowed: set[str]) -> None:
@@ -88,6 +103,7 @@ def route_get(target: str) -> tuple[int, dict]:
 
     if parsed.path == "/ready":
         _validate_query(query, set())
+        read_openapi_contract()
         list_media_items(
             endpoint_url=PROVENANCE_ENDPOINT,
             bucket=PROVENANCE_BUCKET,
@@ -98,6 +114,10 @@ def route_get(target: str) -> tuple[int, dict]:
             "service": "babelapha-provenance-api",
             "status": "ready",
         }
+
+    if parsed.path == "/api/v1/openapi.json":
+        _validate_query(query, set())
+        return 200, read_openapi_contract()
 
     if parsed.path == "/api/v1/media":
         _validate_query(query, {"cursor", "limit"})

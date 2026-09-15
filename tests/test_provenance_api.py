@@ -1,3 +1,5 @@
+import copy
+from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
@@ -8,6 +10,11 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
+try:
+    import jsonschema
+except ModuleNotFoundError:
+    jsonschema = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 API_DIR = ROOT / "pipelines" / "airflow"
@@ -17,9 +24,95 @@ SPEC = importlib.util.spec_from_file_location("babelapha_provenance_api", MODULE
 api = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(api)
+inspector = sys.modules["inspect_provenance"]
+provenance = sys.modules["provenance"]
 
 
 class ProvenanceAPITests(unittest.TestCase):
+    def test_openapi_contract_is_versioned_read_only_and_matches_routes(self):
+        contract = api.read_openapi_contract()
+        expected_paths = {
+            "/health",
+            "/ready",
+            "/api/v1/openapi.json",
+            "/api/v1/media",
+            "/api/v1/media/{object_id}",
+        }
+
+        self.assertEqual(contract["openapi"], "3.1.0")
+        self.assertEqual(contract["info"]["version"], api.API_VERSION)
+        self.assertEqual(set(contract["paths"]), expected_paths)
+        self.assertEqual(contract["security"], [])
+        for path, definition in contract["paths"].items():
+            with self.subTest(path=path):
+                self.assertEqual(set(definition), {"get"})
+        manifest_ref = contract["components"]["schemas"]["RunView"]["properties"][
+            "records"
+        ]["items"]["$ref"]
+        self.assertIn("089e23c53303b0c4b5298b12fdda11f646e3ff2b", manifest_ref)
+        self.assertNotIn("/main/", manifest_ref)
+
+        status, served = api.route_get("/api/v1/openapi.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(served, contract)
+
+    @unittest.skipIf(jsonschema is None, "jsonschema is not installed in the lightweight host")
+    def test_actual_catalog_and_detail_payloads_conform_to_openapi_schemas(self):
+        contract = api.read_openapi_contract()
+        catalog_data = {
+            "items": [{"object_id": "interview/002"}],
+            "item_count": 1,
+            "next_cursor": None,
+        }
+        with mock.patch.object(api, "list_media_items", return_value=catalog_data):
+            _, catalog = api.route_get("/api/v1/media")
+
+        record = provenance.build_manifest(
+            object_id="interview/002",
+            filename="interview.mp4",
+            run_id="manual__run-42",
+            dag_id="ingest_pipeline",
+            task_id="validate_inputs",
+            stage="request_validated",
+            attempt=1,
+            status="SUCCEEDED",
+            decision={
+                "outcome": "accepted",
+                "reason_code": "INPUT_PARAMETERS_ACCEPTED",
+                "message": "The request is valid.",
+            },
+            completed_at=datetime.now(timezone.utc),
+            git_commit="b" * 40,
+            code_path="/opt/airflow/dags/ingest_pipeline.py",
+            code_sha256="c" * 64,
+            container_image="babelapha-airflow",
+            container_digest="sha256:" + "d" * 64,
+        )
+        detail = {
+            "api_version": api.API_VERSION,
+            "data": inspector.build_view("interview/002", [record]),
+        }
+
+        schemas = copy.deepcopy(contract["components"]["schemas"])
+        manifest_schema = json.loads(
+            (ROOT / "contracts" / "provenance-manifest-v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest_schema.pop("$id", None)
+        schemas["RunView"]["properties"]["records"]["items"] = manifest_schema
+        for name, payload in (("CatalogEnvelope", catalog), ("ProvenanceEnvelope", detail)):
+            with self.subTest(schema=name):
+                schema = {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "components": {"schemas": schemas},
+                    "$ref": f"#/components/schemas/{name}",
+                }
+                jsonschema.Draft202012Validator(
+                    schema,
+                    format_checker=jsonschema.FormatChecker(),
+                ).validate(payload)
+
     def test_health_is_versioned_and_storage_independent(self):
         status, payload = api.route_get("/health")
 

@@ -141,6 +141,7 @@ s3://pachyderm/output/<id>/dash/*
    ```bash
    curl http://localhost:8010/api/v1/media
    curl http://localhost:8010/api/v1/media/sample-001
+   curl http://localhost:8010/api/v1/openapi.json
    ```
 
 Alternative event-driven path (closer to production):

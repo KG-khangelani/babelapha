@@ -1,0 +1,333 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Babelapha Provenance Read API",
+    "version": "1.0.0",
+    "description": "Read-only discovery and validated views over canonical provenance manifests and their immutable OpenLineage delivery evidence."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8010",
+      "description": "Local Docker Compose development boundary"
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "The HTTP process is running.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ServiceStatus"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "getReadiness",
+        "responses": {
+          "200": {
+            "description": "The canonical evidence store is readable.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ServiceStatus"}
+              }
+            }
+          },
+          "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPIContract",
+        "responses": {
+          "200": {
+            "description": "This exact OpenAPI 3.1 contract.",
+            "content": {
+              "application/json": {
+                "schema": {"type": "object"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media": {
+      "get": {
+        "operationId": "listMediaItems",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque S3 continuation token. Prefer the encoded next_href returned by the preceding page.",
+            "schema": {"type": "string", "minLength": 1}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of canonical media object identities.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/CatalogEnvelope"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/InvalidRequest"},
+          "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
+        }
+      }
+    },
+    "/api/v1/media/{object_id}": {
+      "get": {
+        "operationId": "getMediaProvenance",
+        "parameters": [
+          {
+            "name": "object_id",
+            "in": "path",
+            "required": true,
+            "description": "Canonical percent-encoded media object identifier.",
+            "schema": {"type": "string", "minLength": 1}
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "description": "Restrict the view to one exact Airflow run ID.",
+            "schema": {"type": "string", "minLength": 1}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validated canonical provenance and OpenLineage delivery evidence.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ProvenanceEnvelope"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/InvalidRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/EvidenceReadFailed"}
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "InvalidRequest": {
+        "description": "The request is ambiguous or malformed.",
+        "content": {
+          "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
+        }
+      },
+      "NotFound": {
+        "description": "No canonical evidence exists for the requested identity.",
+        "content": {
+          "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
+        }
+      },
+      "EvidenceReadFailed": {
+        "description": "Canonical evidence could not be read or did not pass validation.",
+        "content": {
+          "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
+        }
+      }
+    },
+    "schemas": {
+      "ServiceStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["api_version", "service", "status"],
+        "properties": {
+          "api_version": {"const": "1.0.0"},
+          "service": {"const": "babelapha-provenance-api"},
+          "status": {"enum": ["ok", "ready"]}
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["api_version", "error"],
+        "properties": {
+          "api_version": {"const": "1.0.0"},
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "message"],
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      },
+      "CatalogEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["api_version", "data"],
+        "properties": {
+          "api_version": {"const": "1.0.0"},
+          "data": {"$ref": "#/components/schemas/Catalog"}
+        }
+      },
+      "Catalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "item_count", "next_cursor", "next_href"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/CatalogItem"}
+          },
+          "item_count": {"type": "integer", "minimum": 0, "maximum": 200},
+          "next_cursor": {"type": ["string", "null"]},
+          "next_href": {"type": ["string", "null"]}
+        }
+      },
+      "CatalogItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_id", "href"],
+        "properties": {
+          "object_id": {"type": "string", "minLength": 1},
+          "href": {"type": "string", "pattern": "^/api/v1/media/"}
+        }
+      },
+      "ProvenanceEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["api_version", "data"],
+        "properties": {
+          "api_version": {"const": "1.0.0"},
+          "data": {"$ref": "#/components/schemas/ProvenanceView"}
+        }
+      },
+      "ProvenanceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object_id", "run_count", "record_count", "openlineage_delivery", "runs"],
+        "properties": {
+          "object_id": {"type": "string", "minLength": 1},
+          "run_count": {"type": "integer", "minimum": 1},
+          "record_count": {"type": "integer", "minimum": 1},
+          "openlineage_delivery": {"$ref": "#/components/schemas/OpenLineageDelivery"},
+          "runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/RunView"}
+          }
+        }
+      },
+      "RunView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "dag_id", "statuses_observed", "first_recorded_at", "last_recorded_at", "task_coverage", "records"],
+        "properties": {
+          "run_id": {"type": "string", "minLength": 1},
+          "dag_id": {"type": "string", "minLength": 1},
+          "statuses_observed": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["SUCCEEDED", "FAILED", "RETRYING", "SKIPPED"]}
+          },
+          "first_recorded_at": {"type": "string", "format": "date-time"},
+          "last_recorded_at": {"type": "string", "format": "date-time"},
+          "task_coverage": {"$ref": "#/components/schemas/TaskCoverage"},
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "https://raw.githubusercontent.com/KG-khangelani/babelapha/089e23c53303b0c4b5298b12fdda11f646e3ff2b/contracts/provenance-manifest-v1.schema.json"
+            }
+          }
+        }
+      },
+      "TaskCoverage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract_known", "contract_source", "contract_sha256", "contract_evidence_status", "records_with_embedded_contract", "record_count", "expected_task_ids", "recorded_task_ids", "not_recorded_task_ids", "unexpected_task_ids"],
+        "properties": {
+          "contract_known": {"type": "boolean"},
+          "contract_source": {"enum": ["MANIFEST_EMBEDDED", "CURRENT_REGISTRY_FALLBACK", "UNKNOWN"]},
+          "contract_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "contract_evidence_status": {"enum": ["COMPLETE", "PARTIAL", "FALLBACK", "UNKNOWN"]},
+          "records_with_embedded_contract": {"type": "integer", "minimum": 0},
+          "record_count": {"type": "integer", "minimum": 1},
+          "expected_task_ids": {"$ref": "#/components/schemas/TaskIds"},
+          "recorded_task_ids": {"$ref": "#/components/schemas/TaskIds"},
+          "not_recorded_task_ids": {"$ref": "#/components/schemas/TaskIds"},
+          "unexpected_task_ids": {"$ref": "#/components/schemas/TaskIds"}
+        }
+      },
+      "TaskIds": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      },
+      "OpenLineageDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state_counts", "by_manifest_id", "unmatched", "errors"],
+        "properties": {
+          "state_counts": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 1}
+          },
+          "by_manifest_id": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/components/schemas/DeliveryState"}
+          },
+          "unmatched": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/components/schemas/DeliveryState"}
+          },
+          "errors": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/EvidenceError"}
+          }
+        }
+      },
+      "DeliveryState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "integrity", "outbox_uri", "event_sha256", "receipt_uri", "endpoint", "http_status", "delivered_at", "error"],
+        "properties": {
+          "state": {"enum": ["NOT_CHECKED", "PENDING", "DELIVERED", "MISSING_OUTBOX", "ORPHANED_RECEIPT", "INTEGRITY_ERROR"]},
+          "integrity": {"enum": ["NOT_CHECKED", "VERIFIED", "FAILED"]},
+          "outbox_uri": {"type": ["string", "null"]},
+          "event_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "receipt_uri": {"type": ["string", "null"]},
+          "endpoint": {"type": ["string", "null"], "format": "uri"},
+          "http_status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+          "delivered_at": {"type": ["string", "null"], "format": "date-time"},
+          "error": {"type": ["string", "null"]}
+        }
+      },
+      "EvidenceError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "object_uri", "error"],
+        "properties": {
+          "state": {"enum": ["ORPHANED_RECEIPT", "INTEGRITY_ERROR"]},
+          "object_uri": {"type": "string", "minLength": 1},
+          "error": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
