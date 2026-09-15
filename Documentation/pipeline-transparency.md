@@ -162,6 +162,17 @@ container digest with:
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
+The same view joins each manifest to its immutable OpenLineage outbox event and
+delivery receipt. It reports `DELIVERED`, `PENDING`, `MISSING_OUTBOX`,
+`ORPHANED_RECEIPT`, or `INTEGRITY_ERROR`, together with the exact event SHA-256,
+receipt, accepting endpoint, HTTP status, and delivery time. A queued event is
+marked verified only when all of its execution and artifact facts match the
+canonical manifest.
+
+The inspector exits with code `3` for missing or inconsistent delivery
+evidence. Add `--require-delivered` in CI or an operational check to also return
+code `4` while any valid event remains pending.
+
 Restrict the view to one Airflow run or return machine-readable JSON:
 
 ```powershell
