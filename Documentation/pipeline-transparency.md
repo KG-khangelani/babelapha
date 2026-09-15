@@ -110,8 +110,16 @@ marked `CONFIGURED_REF_ONLY` rather than exact.
 
 ## OpenLineage and Marquez
 
-The same manifest identity, artifact edges, decision, Git commit, and container
-digest are emitted to:
+The same manifest identity, run/stage/attempt/status/timing, decision, Git and
+DAG identity, container identity, orchestration details, and artifact evidence
+are emitted to OpenLineage. Every input and output dataset carries its SHA-256,
+byte size, media type, integrity state, Pachyderm commit, S3 version, and ETag in
+the versioned `babelapha_artifact` input/output facet. Placing this evidence in
+`inputFacets` and `outputFacets` preserves it on the dataset version associated
+with that exact run. Schema URLs are pinned to the exact contract commit rather
+than the mutable default branch.
+
+Events are sent to:
 
 ```text
 POST http://marquez:5000/api/v1/lineage

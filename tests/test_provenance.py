@@ -173,15 +173,102 @@ class ProvenanceContractTests(unittest.TestCase):
             "s3://pachyderm/output/interview-042/hls/playlist.m3u8",
             sha256="b" * 64,
             size_bytes=12,
+            media_type="application/vnd.apple.mpegurl",
+            pachyderm_commit="pach-42",
+            s3_version_id="version-42",
+            etag="etag-42",
         )
-        record = self.sample_manifest(outputs=[item])
+        record = self.sample_manifest(
+            inputs=[item],
+            outputs=[item],
+            code_path="/opt/airflow/dags/ingest_pipeline.py",
+            code_sha256="c" * 64,
+            airflow_version="3.3.1",
+            airflow_log_url="https://airflow.example/log/42",
+        )
         event = provenance.build_openlineage_event(record)
+        execution_facet = event["run"]["facets"]["babelapha_execution"]
+        artifact_facet = event["outputs"][0]["outputFacets"]["babelapha_artifact"]
+        input_artifact_facet = event["inputs"][0]["inputFacets"]["babelapha_artifact"]
         self.assertEqual(event["run"]["runId"], record["manifest_id"])
-        self.assertEqual(
-            event["run"]["facets"]["babelapha_execution"]["manifestUri"],
-            record["links"]["manifest"],
-        )
+        expected_execution = {
+            "schemaVersion": record["schema_version"],
+            "manifestId": record["manifest_id"],
+            "manifestUri": record["links"]["manifest"],
+            "recordedAt": record["recorded_at"],
+            "objectId": record["object"]["id"],
+            "objectFilename": record["object"]["filename"],
+            "airflowRunId": record["run"]["id"],
+            "dagId": record["run"]["dag_id"],
+            "taskId": record["run"]["task_id"],
+            "stage": record["run"]["stage"],
+            "attempt": record["run"]["attempt"],
+            "status": record["run"]["status"],
+            "startedAt": record["run"]["started_at"],
+            "completedAt": record["run"]["completed_at"],
+            "durationMs": record["run"]["duration_ms"],
+            "decisionOutcome": record["decision"]["outcome"],
+            "decisionReasonCode": record["decision"]["reason_code"],
+            "decisionMessage": record["decision"]["message"],
+            "gitRepository": record["execution"]["git"]["repository"],
+            "gitCommit": record["execution"]["git"]["commit"],
+            "codePath": record["execution"]["code"]["path"],
+            "codeSha256": record["execution"]["code"]["sha256"],
+            "containerImage": record["execution"]["container"]["image"],
+            "containerDigest": record["execution"]["container"]["digest"],
+            "containerIdentityStatus": record["execution"]["container"]["identity_status"],
+            "parameters": record["execution"]["parameters"],
+            "orchestratorName": record["orchestrator"]["name"],
+            "orchestratorVersion": record["orchestrator"]["version"],
+            "airflowLogUrl": record["links"]["airflow_log"],
+        }
+        for field, expected in expected_execution.items():
+            self.assertEqual(execution_facet[field], expected, field)
+
+        expected_artifact = {
+            "uri": item["uri"],
+            "kind": item["kind"],
+            "sha256": item["sha256"],
+            "sizeBytes": item["size_bytes"],
+            "mediaType": item["media_type"],
+            "integrity": item["integrity"],
+            "pachydermCommit": item["version"]["pachyderm_commit"],
+            "s3VersionId": item["version"]["s3_version_id"],
+            "etag": item["version"]["etag"],
+        }
+        for field, expected in expected_artifact.items():
+            self.assertEqual(artifact_facet[field], expected, field)
+            self.assertEqual(input_artifact_facet[field], expected, field)
         self.assertEqual(event["outputs"][0]["namespace"], "s3://pachyderm")
+        self.assertIn(provenance.CONTRACTS_COMMIT, execution_facet["_schemaURL"])
+        self.assertIn(provenance.CONTRACTS_COMMIT, artifact_facet["_schemaURL"])
+        self.assertNotIn("/main/", record["$schema"])
+
+    def test_openlineage_event_types_preserve_each_terminal_and_attempt_state(self):
+        cases = {
+            "SUCCEEDED": ("COMPLETE", "accepted", "STAGE_COMPLETED"),
+            "FAILED": ("FAIL", "failed", "TASK_FAILED"),
+            "RETRYING": ("FAIL", "retrying", "TASK_RETRYING"),
+            "SKIPPED": ("ABORT", "skipped", "TASK_SKIPPED"),
+        }
+        for status, (event_type, outcome, reason_code) in cases.items():
+            with self.subTest(status=status):
+                record = self.sample_manifest(
+                    status=status,
+                    attempt=3,
+                    decision={
+                        "outcome": outcome,
+                        "reason_code": reason_code,
+                        "message": f"Task is {status.lower()}.",
+                    },
+                )
+                event = provenance.build_openlineage_event(record)
+                execution_facet = event["run"]["facets"]["babelapha_execution"]
+                self.assertEqual(event["eventType"], event_type)
+                self.assertEqual(execution_facet["status"], status)
+                self.assertEqual(execution_facet["attempt"], 3)
+                self.assertEqual(execution_facet["decisionOutcome"], outcome)
+                self.assertEqual(execution_facet["decisionReasonCode"], reason_code)
 
     def test_openlineage_skip_is_reported_instead_of_claimed_as_emitted(self):
         with mock.patch.dict("os.environ", {}, clear=True):
@@ -200,13 +287,26 @@ class ProvenanceContractTests(unittest.TestCase):
     @unittest.skipIf(jsonschema is None, "jsonschema is not installed in the lightweight host environment")
     def test_openlineage_custom_facet_conforms_to_its_json_schema(self):
         schema = json.loads(
-            (ROOT / "contracts" / "openlineage-babelapha-execution-run-facet-v1.schema.json").read_text()
+            (ROOT / "contracts" / "openlineage-babelapha-execution-run-facet-v2.schema.json").read_text()
         )
-        facet = provenance.build_openlineage_event(self.sample_manifest())["run"]["facets"][
-            "babelapha_execution"
-        ]
+        item = provenance.artifact(
+            "s3://pachyderm/output/interview-042/playlist.m3u8",
+            sha256="f" * 64,
+            size_bytes=12,
+        )
+        event = provenance.build_openlineage_event(self.sample_manifest(outputs=[item]))
+        facet = event["run"]["facets"]["babelapha_execution"]
         validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
         validator.validate(facet)
+
+        artifact_schema = json.loads(
+            (ROOT / "contracts" / "openlineage-babelapha-artifact-dataset-facet-v1.schema.json").read_text()
+        )
+        artifact_validator = jsonschema.Draft202012Validator(
+            artifact_schema,
+            format_checker=jsonschema.FormatChecker(),
+        )
+        artifact_validator.validate(event["outputs"][0]["outputFacets"]["babelapha_artifact"])
 
 
 if __name__ == "__main__":

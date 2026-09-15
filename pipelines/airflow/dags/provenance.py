@@ -23,13 +23,18 @@ import uuid
 
 SCHEMA_VERSION = "1.0.0"
 PRODUCER = "https://github.com/KG-khangelani/babelapha"
+CONTRACTS_COMMIT = "089e23c53303b0c4b5298b12fdda11f646e3ff2b"
 MANIFEST_SCHEMA_URI = (
-    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/main/"
+    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{CONTRACTS_COMMIT}/"
     "contracts/provenance-manifest-v1.schema.json"
 )
 OPENLINEAGE_FACET_SCHEMA_URI = (
-    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/main/"
-    "contracts/openlineage-babelapha-execution-run-facet-v1.schema.json"
+    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{CONTRACTS_COMMIT}/"
+    "contracts/openlineage-babelapha-execution-run-facet-v2.schema.json"
+)
+OPENLINEAGE_ARTIFACT_FACET_SCHEMA_URI = (
+    f"{PRODUCER.replace('github.com', 'raw.githubusercontent.com')}/{CONTRACTS_COMMIT}/"
+    "contracts/openlineage-babelapha-artifact-dataset-facet-v1.schema.json"
 )
 OPENLINEAGE_SCHEMA_URI = (
     "https://openlineage.io/spec/1-0-5/OpenLineage.json#/definitions/RunEvent"
@@ -404,27 +409,83 @@ def assert_success_manifests(
     return [f"s3://{target_bucket}/{key}" for key in sorted(keys)]
 
 
-def _dataset(item: dict) -> dict:
+def _artifact_facet(item: dict) -> dict:
+    version = item["version"]
+    return {
+        "_producer": PRODUCER,
+        "_schemaURL": OPENLINEAGE_ARTIFACT_FACET_SCHEMA_URI,
+        "uri": item["uri"],
+        "kind": item["kind"],
+        "sha256": item["sha256"],
+        "sizeBytes": item["size_bytes"],
+        "mediaType": item["media_type"],
+        "integrity": item["integrity"],
+        "pachydermCommit": version["pachyderm_commit"],
+        "s3VersionId": version["s3_version_id"],
+        "etag": version["etag"],
+    }
+
+
+def _dataset(item: dict, *, role: str) -> dict:
+    if role not in {"input", "output"}:
+        raise ValueError(f"Unsupported OpenLineage dataset role: {role}")
     parsed = urllib.parse.urlparse(item["uri"])
     namespace = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme else "babelapha"
     name = parsed.path.lstrip("/") or item["uri"]
-    return {"namespace": namespace, "name": name, "facets": {}}
+    return {
+        "namespace": namespace,
+        "name": name,
+        "facets": {},
+        f"{role}Facets": {"babelapha_artifact": _artifact_facet(item)},
+    }
 
 
 def build_openlineage_event(record: dict) -> dict:
     validate_manifest(record)
-    event_type = "COMPLETE" if record["run"]["status"] == "SUCCEEDED" else "FAIL"
+    event_type = {
+        "SUCCEEDED": "COMPLETE",
+        "FAILED": "FAIL",
+        "RETRYING": "FAIL",
+        "SKIPPED": "ABORT",
+    }[record["run"]["status"]]
     execution = record["execution"]
+    run = record["run"]
+    decision = record["decision"]
+    code = execution["code"]
+    container = execution["container"]
+    orchestrator = record["orchestrator"]
     facet = {
         "_producer": PRODUCER,
         "_schemaURL": OPENLINEAGE_FACET_SCHEMA_URI,
+        "schemaVersion": record["schema_version"],
         "manifestId": record["manifest_id"],
         "manifestUri": record["links"]["manifest"],
+        "recordedAt": record["recorded_at"],
         "objectId": record["object"]["id"],
-        "attempt": record["run"]["attempt"],
-        "decision": record["decision"]["reason_code"],
+        "objectFilename": record["object"]["filename"],
+        "airflowRunId": run["id"],
+        "dagId": run["dag_id"],
+        "taskId": run["task_id"],
+        "stage": run["stage"],
+        "attempt": run["attempt"],
+        "status": run["status"],
+        "startedAt": run["started_at"],
+        "completedAt": run["completed_at"],
+        "durationMs": run["duration_ms"],
+        "decisionOutcome": decision["outcome"],
+        "decisionReasonCode": decision["reason_code"],
+        "decisionMessage": decision["message"],
+        "gitRepository": execution["git"]["repository"],
         "gitCommit": execution["git"]["commit"],
-        "containerDigest": execution["container"]["digest"],
+        "codePath": code["path"],
+        "codeSha256": code["sha256"],
+        "containerImage": container["image"],
+        "containerDigest": container["digest"],
+        "containerIdentityStatus": container["identity_status"],
+        "parameters": execution["parameters"],
+        "orchestratorName": orchestrator["name"],
+        "orchestratorVersion": orchestrator["version"],
+        "airflowLogUrl": record["links"]["airflow_log"],
     }
     return {
         "eventType": event_type,
@@ -435,8 +496,8 @@ def build_openlineage_event(record: dict) -> dict:
             "name": f"{record['run']['dag_id']}.{record['run']['task_id']}",
             "facets": {},
         },
-        "inputs": [_dataset(item) for item in record["inputs"]],
-        "outputs": [_dataset(item) for item in record["outputs"]],
+        "inputs": [_dataset(item, role="input") for item in record["inputs"]],
+        "outputs": [_dataset(item, role="output") for item in record["outputs"]],
         "producer": PRODUCER,
         "schemaURL": OPENLINEAGE_SCHEMA_URI,
     }
