@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.1.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.2.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -269,6 +269,14 @@ OpenLineage delivery proof. `EXPECTED`, `UNEXPECTED`, and `UNKNOWN` membership
 labels distinguish contract topology from observed evidence without turning a
 missing callback into a fabricated execution result. Full manifests remain in
 the same response for exact artifact hashes and code/container identities.
+
+Before returning a run, the reader verifies that every stage record agrees on
+the media filename, Pachyderm commit, Git repository and commit, Git identity
+status, DAG path and hashes, and Airflow identity. A contradiction fails the
+entire read as an evidence-integrity error. The common facts are exposed as a
+first-class `run_identity` with `consistency: VERIFIED`; container identity
+remains on each stage because different processing stages intentionally use
+different images.
 
 The inspector exits with code `3` for missing or inconsistent delivery
 evidence. Add `--require-delivered` in CI or an operational check to also return

@@ -159,7 +159,9 @@ s3://pachyderm/output/<id>/dash/*
    The media detail response includes an ordered `stage_evidence` ledger. It
    groups retries and terminal decisions by task and explicitly marks expected
    stages that have no immutable record, while the accompanying manifests retain
-   the exact artifact, Git, DAG-bundle, and container identities.
+   the exact artifact, Git, DAG-bundle, and container identities. A verified
+   `run_identity` is returned only when every stage agrees on the common
+   filename, Pachyderm, Git, DAG, and orchestrator facts.
 
 Alternative event-driven path (closer to production):
 

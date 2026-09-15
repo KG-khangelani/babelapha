@@ -27,9 +27,10 @@ An outbox object without its matching delivery receipt is pending and can be
 replayed without rebuilding or changing the original event.
 
 `provenance-read-api-v1.openapi.json` versions the read-only explorer boundary.
-Version `1.1.0` adds an ordered stage-evidence ledger to each run so consumers
-do not have to infer task topology, retries, or missing evidence from an
-unordered set of manifests.
+Version `1.2.0` provides an ordered stage-evidence ledger and a verified
+run-level identity. Consumers do not have to infer task topology, retries, or
+missing evidence from an unordered set of manifests, and contradictory
+filename, Pachyderm, Git, DAG, or orchestrator facts fail the read boundary.
 
 `reports/<object-id>/*.json` files remain mutable operational summaries for
 compatibility; they are not the provenance source of truth.

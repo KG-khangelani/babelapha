@@ -1,4 +1,5 @@
 import importlib.util
+import copy
 import io
 import json
 from pathlib import Path
@@ -163,6 +164,8 @@ class ProvenanceInspectorTests(unittest.TestCase):
             "DAG: ingest_pipeline",
             "Task coverage: 2/8 recorded",
             "Task contract: source=CURRENT_REGISTRY_FALLBACK evidence=FALLBACK",
+            "Run identity: consistency=VERIFIED",
+            "pachyderm_commit=pachyderm-commit-42",
             "Stage evidence:",
             "position=5 task=transcode membership=EXPECTED evidence=RECORDED attempts=1:FAILED:TASK_FAILED",
             "No immutable execution record: validate_inputs, inspect_source, virus_scan, verify_outputs, mark_complete, verify_provenance",
@@ -220,6 +223,25 @@ class ProvenanceInspectorTests(unittest.TestCase):
             },
         )
         self.assertEqual(run["statuses_observed"], ["FAILED", "RETRYING", "SUCCEEDED"])
+        self.assertEqual(
+            run["run_identity"],
+            {
+                "consistency": "VERIFIED",
+                "object_filename": "interview.mp4",
+                "pachyderm_commit": "pachyderm-commit-42",
+                "git": {
+                    "repository": "https://github.com/KG-khangelani/babelapha",
+                    "commit": "b" * 40,
+                    "identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+                },
+                "code": {
+                    "path": "/opt/airflow/dags/ingest_pipeline.py",
+                    "sha256": "c" * 64,
+                    "bundle_sha256": "e" * 64,
+                },
+                "orchestrator": {"name": "airflow", "version": "3.3.1"},
+            },
+        )
         stages = run["stage_evidence"]
         self.assertEqual(
             [stage["task_id"] for stage in stages],
@@ -323,6 +345,50 @@ class ProvenanceInspectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "records from multiple DAGs"):
             inspector.build_view("interview-042", records)
 
+    def test_one_run_id_rejects_conflicting_invariant_execution_facts(self):
+        mutations = (
+            ("object filenames", ("object", "filename"), "another.mp4"),
+            ("Git repositories", ("execution", "git", "repository"), "https://example.test/other"),
+            ("Git commits", ("execution", "git", "commit"), "f" * 40),
+            (
+                "Git identity statuses",
+                ("execution", "parameters", "git_identity_status"),
+                "VERIFIED_CLEAN_GIT_WORKTREE",
+            ),
+            ("DAG code paths", ("execution", "code", "path"), "/dags/other.py"),
+            ("DAG code SHA-256 values", ("execution", "code", "sha256"), "f" * 64),
+            (
+                "DAG bundle SHA-256 values",
+                ("execution", "parameters", "dag_code_bundle_sha256"),
+                "f" * 64,
+            ),
+            ("orchestrator versions", ("orchestrator", "version"), "3.4.0"),
+        )
+
+        for label, path, value in mutations:
+            with self.subTest(label=label):
+                first = sample_record(task_id="validate_inputs")
+                second = copy.deepcopy(
+                    sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")
+                )
+                target = second
+                for segment in path[:-1]:
+                    target = target[segment]
+                target[path[-1]] = value
+
+                with self.assertRaisesRegex(ValueError, f"conflicting {label}"):
+                    inspector.build_view("interview-042", [first, second])
+
+        first = sample_record(task_id="validate_inputs")
+        second = copy.deepcopy(
+            sample_record(task_id="transcode", recorded_at="2026-09-15T08:01:00Z")
+        )
+        second["execution"]["parameters"]["pachyderm_commit"] = "pach-2"
+        for item in [*second["inputs"], *second["outputs"]]:
+            item["version"]["pachyderm_commit"] = "pach-2"
+        with self.assertRaisesRegex(ValueError, "conflicting Pachyderm commits"):
+            inspector.build_view("interview-042", [first, second])
+
     def test_embedded_contract_preserves_historical_topology_after_registry_drift(self):
         historical_contract = {
             "schema_version": provenance.PIPELINE_TASK_CONTRACT_VERSION,
@@ -334,7 +400,11 @@ class ProvenanceInspectorTests(unittest.TestCase):
         )
         record = sample_record(
             task_id="legacy_stage",
-            parameters={"pipeline_task_contract": historical_contract},
+            parameters={
+                "dag_code_bundle_sha256": "e" * 64,
+                "git_identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+                "pipeline_task_contract": historical_contract,
+            },
         )
 
         coverage = inspector.build_view("interview-042", [record])["runs"][0]["task_coverage"]
@@ -350,7 +420,11 @@ class ProvenanceInspectorTests(unittest.TestCase):
         records = [
             sample_record(
                 task_id="validate_inputs",
-                parameters={"pipeline_task_contract": contract},
+                parameters={
+                    "dag_code_bundle_sha256": "e" * 64,
+                    "git_identity_status": "VERIFIED_BUNDLE_ATTESTATION",
+                    "pipeline_task_contract": contract,
+                },
             ),
             sample_record(task_id="inspect_source", recorded_at="2026-09-15T08:01:00Z"),
         ]

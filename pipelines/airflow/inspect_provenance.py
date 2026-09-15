@@ -331,6 +331,80 @@ def _stage_evidence(
     return ledger
 
 
+def _consistent_run_value(run_id: str, label: str, values: Iterable[object]) -> object:
+    """Return one invariant value or reject a run assembled from contradictory evidence."""
+    unique = set(values)
+    if len(unique) != 1:
+        rendered = ", ".join(sorted(repr(value) for value in unique))
+        raise ValueError(f"Run {run_id!r} contains conflicting {label}: {rendered}")
+    return next(iter(unique))
+
+
+def _record_pachyderm_commit(record: dict) -> str | None:
+    """Recover one record's commit from modern parameters or legacy artifact evidence."""
+    commits = {
+        item["version"]["pachyderm_commit"]
+        for item in [*record["inputs"], *record["outputs"]]
+        if item["version"]["pachyderm_commit"] is not None
+    }
+    parameter = record["execution"]["parameters"].get("pachyderm_commit")
+    if parameter is not None:
+        commits.add(parameter)
+    if len(commits) > 1:
+        rendered = ", ".join(sorted(repr(value) for value in commits))
+        raise ValueError(
+            f"Manifest {record['manifest_id']!r} contains conflicting Pachyderm commits: "
+            f"{rendered}"
+        )
+    return next(iter(commits), None)
+
+
+def _run_identity(run_id: str, records: list[dict]) -> dict:
+    """Verify and expose facts that must be identical for every attempt in one run."""
+    def fact(label: str, getter) -> object:
+        return _consistent_run_value(run_id, label, (getter(record) for record in records))
+
+    return {
+        "consistency": "VERIFIED",
+        "object_filename": fact("object filenames", lambda record: record["object"]["filename"]),
+        "pachyderm_commit": fact(
+            "Pachyderm commits",
+            _record_pachyderm_commit,
+        ),
+        "git": {
+            "repository": fact(
+                "Git repositories", lambda record: record["execution"]["git"]["repository"]
+            ),
+            "commit": fact("Git commits", lambda record: record["execution"]["git"]["commit"]),
+            "identity_status": fact(
+                "Git identity statuses",
+                lambda record: record["execution"]["parameters"].get("git_identity_status"),
+            ),
+        },
+        "code": {
+            "path": fact("DAG code paths", lambda record: record["execution"]["code"]["path"]),
+            "sha256": fact(
+                "DAG code SHA-256 values",
+                lambda record: record["execution"]["code"]["sha256"],
+            ),
+            "bundle_sha256": fact(
+                "DAG bundle SHA-256 values",
+                lambda record: record["execution"]["parameters"].get(
+                    "dag_code_bundle_sha256"
+                ),
+            ),
+        },
+        "orchestrator": {
+            "name": fact(
+                "orchestrator names", lambda record: record["orchestrator"]["name"]
+            ),
+            "version": fact(
+                "orchestrator versions", lambda record: record["orchestrator"]["version"]
+            ),
+        },
+    }
+
+
 def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict | None = None) -> dict:
     """Group validated records by Airflow run without inventing run state."""
     grouped: dict[str, list[dict]] = {}
@@ -381,6 +455,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                 f"Run {run_id!r} contains records from multiple DAGs: {sorted(dag_ids)}"
             )
         dag_id = next(iter(dag_ids))
+        run_identity = _run_identity(run_id, run_records)
         embedded_contracts = {
             json.dumps(contract, sort_keys=True, separators=(",", ":")): contract
             for record in run_records
@@ -441,6 +516,7 @@ def build_view(object_id: str, records: Iterable[dict], delivery_evidence: dict 
                 "statuses_observed": sorted({record["run"]["status"] for record in ordered}),
                 "first_recorded_at": ordered[0]["recorded_at"],
                 "last_recorded_at": ordered[-1]["recorded_at"],
+                "run_identity": run_identity,
                 "task_coverage": {
                     "contract_known": bool(expected_task_ids),
                     "contract_source": contract_source,
@@ -519,6 +595,7 @@ def render_text(view: dict) -> str:
     ]
     for run in view["runs"]:
         coverage = run["task_coverage"]
+        identity = run["run_identity"]
         coverage_denominator = (
             str(len(coverage["expected_task_ids"])) if coverage["contract_known"] else "unknown"
         )
@@ -529,6 +606,20 @@ def render_text(view: dict) -> str:
                 f"DAG: {run['dag_id']}",
                 f"Observed statuses: {', '.join(run['statuses_observed'])}",
                 f"Evidence window: {run['first_recorded_at']} -> {run['last_recorded_at']}",
+                f"Run identity: consistency={identity['consistency']}",
+                "  "
+                f"object_filename={identity['object_filename']} "
+                f"pachyderm_commit={_value(identity['pachyderm_commit'])}",
+                "  "
+                f"git={identity['git']['repository']}@{_value(identity['git']['commit'])} "
+                f"identity={_value(identity['git']['identity_status'])}",
+                "  "
+                f"code={identity['code']['path']} "
+                f"sha256={_value(identity['code']['sha256'])} "
+                f"bundle_sha256={_value(identity['code']['bundle_sha256'])}",
+                "  "
+                f"orchestrator={identity['orchestrator']['name']}@"
+                f"{_value(identity['orchestrator']['version'])}",
                 f"Task coverage: {len(coverage['recorded_task_ids'])}/{coverage_denominator} recorded",
                 "Task contract: "
                 f"source={coverage['contract_source']} "

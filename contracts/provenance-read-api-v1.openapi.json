@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.1.0",
-    "description": "Read-only discovery and validated views over canonical provenance manifests, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.2.0",
+    "description": "Read-only discovery and validated views over canonical provenance manifests, verified run identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -153,7 +153,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.1.0"},
+          "api_version": {"const": "1.2.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -163,7 +163,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.1.0"},
+          "api_version": {"const": "1.2.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -180,7 +180,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.1.0"},
+          "api_version": {"const": "1.2.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -212,7 +212,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.1.0"},
+          "api_version": {"const": "1.2.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
         }
       },
@@ -235,7 +235,7 @@
       "RunView": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["run_id", "dag_id", "statuses_observed", "first_recorded_at", "last_recorded_at", "task_coverage", "stage_evidence", "records"],
+        "required": ["run_id", "dag_id", "statuses_observed", "first_recorded_at", "last_recorded_at", "run_identity", "task_coverage", "stage_evidence", "records"],
         "properties": {
           "run_id": {"type": "string", "minLength": 1},
           "dag_id": {"type": "string", "minLength": 1},
@@ -247,6 +247,7 @@
           },
           "first_recorded_at": {"type": "string", "format": "date-time"},
           "last_recorded_at": {"type": "string", "format": "date-time"},
+          "run_identity": {"$ref": "#/components/schemas/RunIdentity"},
           "task_coverage": {"$ref": "#/components/schemas/TaskCoverage"},
           "stage_evidence": {
             "type": "array",
@@ -260,6 +261,50 @@
               "$ref": "https://raw.githubusercontent.com/KG-khangelani/babelapha/089e23c53303b0c4b5298b12fdda11f646e3ff2b/contracts/provenance-manifest-v1.schema.json"
             }
           }
+        }
+      },
+      "RunIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["consistency", "object_filename", "pachyderm_commit", "git", "code", "orchestrator"],
+        "properties": {
+          "consistency": {"const": "VERIFIED"},
+          "object_filename": {"type": "string", "minLength": 1},
+          "pachyderm_commit": {"type": ["string", "null"]},
+          "git": {"$ref": "#/components/schemas/RunGitIdentity"},
+          "code": {"$ref": "#/components/schemas/RunCodeIdentity"},
+          "orchestrator": {"$ref": "#/components/schemas/RunOrchestratorIdentity"}
+        }
+      },
+      "RunGitIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "commit", "identity_status"],
+        "properties": {
+          "repository": {"type": "string"},
+          "commit": {"type": ["string", "null"], "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"},
+          "identity_status": {
+            "enum": ["VERIFIED_BUNDLE_ATTESTATION", "VERIFIED_CLEAN_GIT_WORKTREE", "UNVERIFIED_CONFIGURED_ASSERTION", "UNVERIFIED", null]
+          }
+        }
+      },
+      "RunCodeIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "bundle_sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "bundle_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+        }
+      },
+      "RunOrchestratorIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "version": {"type": ["string", "null"]}
         }
       },
       "StageEvidence": {
