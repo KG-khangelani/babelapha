@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 from typing import Iterable
+import urllib.parse
 
 
 DAGS_DIR = Path(__file__).resolve().parent / "dags"
@@ -32,6 +33,52 @@ from provenance import (  # noqa: E402
 
 def _object_prefix(object_id: str) -> str:
     return f"provenance/{_safe_segment(object_id)}/"
+
+
+def _object_id_from_prefix(prefix: str) -> str:
+    root = "provenance/"
+    if not prefix.startswith(root) or not prefix.endswith("/"):
+        raise ValueError(f"Invalid canonical provenance object prefix: {prefix!r}")
+    encoded = prefix[len(root) : -1]
+    if not encoded or "/" in encoded:
+        raise ValueError(f"Invalid canonical provenance object prefix: {prefix!r}")
+    try:
+        object_id = urllib.parse.unquote_to_bytes(encoded).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Invalid UTF-8 provenance object prefix: {prefix!r}") from exc
+    if _object_prefix(object_id) != prefix:
+        raise ValueError(f"Non-canonical provenance object prefix: {prefix!r}")
+    return object_id
+
+
+def list_media_items(
+    *,
+    endpoint_url: str | None = None,
+    bucket: str = "pachyderm",
+    cursor: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """List canonical object identities without reading or deriving run state."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("Media item list limit must be between 1 and 200")
+    request = {
+        "Bucket": bucket,
+        "Prefix": "provenance/",
+        "Delimiter": "/",
+        "MaxKeys": limit,
+    }
+    if cursor:
+        request["ContinuationToken"] = cursor
+    response = _s3_client(endpoint_url).list_objects_v2(**request)
+    items = [
+        {"object_id": _object_id_from_prefix(item["Prefix"])}
+        for item in response.get("CommonPrefixes", [])
+    ]
+    return {
+        "items": items,
+        "item_count": len(items),
+        "next_cursor": response.get("NextContinuationToken") if response.get("IsTruncated") else None,
+    }
 
 
 def read_records(
@@ -480,6 +527,15 @@ def render_text(view: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_catalog_text(catalog: dict) -> str:
+    """Render canonical media identities for interactive selection."""
+    lines = [f"Media items: {catalog['item_count']}"]
+    lines.extend(f"  {item['object_id']}" for item in catalog["items"])
+    if catalog["next_cursor"]:
+        lines.append(f"Next cursor: {catalog['next_cursor']}")
+    return "\n".join(lines) + "\n"
+
+
 def delivery_exit_code(view: dict, *, require_delivered: bool = False) -> int:
     """Make integrity failures machine-detectable while allowing visible pending work."""
     delivery = view["openlineage_delivery"]
@@ -495,8 +551,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Show every immutable run and stage record for one media object.",
     )
-    parser.add_argument("--object-id", required=True, help="Exact media object identifier")
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--object-id", help="Exact media object identifier")
+    selection.add_argument(
+        "--list-objects",
+        action="store_true",
+        help="List canonical media object identifiers for selection",
+    )
     parser.add_argument("--run-id", help="Optionally restrict the view to one exact Airflow run ID")
+    parser.add_argument("--cursor", help="Opaque continuation cursor returned by --list-objects")
+    parser.add_argument("--limit", type=int, default=50, help="List 1-200 media items (default: 50)")
     parser.add_argument("--bucket", default=os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get("S3_BUCKET", "pachyderm"))
     parser.add_argument(
         "--endpoint-url",
@@ -514,6 +578,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.list_objects:
+        if args.run_id or args.require_delivered:
+            raise SystemExit("--run-id and --require-delivered require --object-id")
+        catalog = list_media_items(
+            endpoint_url=args.endpoint_url,
+            bucket=args.bucket,
+            cursor=args.cursor,
+            limit=args.limit,
+        )
+        if args.format == "json":
+            print(json.dumps(catalog, indent=2, sort_keys=True))
+        else:
+            print(render_catalog_text(catalog), end="")
+        return 0
+    if args.cursor:
+        raise SystemExit("--cursor requires --list-objects")
     records = read_records(
         object_id=args.object_id,
         run_id=args.run_id,

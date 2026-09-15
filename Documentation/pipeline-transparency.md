@@ -172,14 +172,35 @@ The Compose stack exposes:
 - MinIO console: <http://localhost:9001>
 - Marquez API: <http://localhost:5000>
 - Marquez lineage UI: <http://localhost:3001>
+- Read-only provenance API: <http://localhost:8010/api/v1/media>
 
-Select one media item and inspect every recorded run, stage decision, failure,
+Discover canonical media IDs, then select one item and inspect every recorded
+run, stage decision, failure,
 artifact hash, storage version, Pachyderm commit, Git commit, DAG hash, and
 container digest with:
 
 ```powershell
+docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
+
+The versioned read-only HTTP boundary exposes the same operations for the
+future explorer without giving a browser direct MinIO credentials:
+
+```text
+GET /health
+GET /ready
+GET /api/v1/media?limit=50&cursor=<opaque-token>
+GET /api/v1/media/<percent-encoded-object-id>?run_id=<run-id>
+```
+
+Its JSON detail response is produced by the same strict manifest,
+OpenLineage-event, and delivery-receipt validation used by the CLI. It does not
+write status, query Airflow, or infer results from logs. CORS is disabled by
+default; local origins can be explicitly allowlisted with the comma-separated
+`PROVENANCE_API_ALLOWED_ORIGINS` value. This Compose service is a development
+read boundary, not an internet security perimeter; add authentication, rate
+limiting, and deployment-specific authorization before public exposure.
 
 The same view joins each manifest to its immutable OpenLineage outbox event and
 delivery receipt. It reports `DELIVERED`, `PENDING`, `MISSING_OUTBOX`,
@@ -220,5 +241,5 @@ python -m unittest discover -s tests -v
 docker compose config --quiet
 ```
 
-The future public explorer should query these canonical records. It must not
-create a second status model or infer provenance from logs.
+The future public explorer should query this read-only API. It must not create
+a second status model or infer provenance from logs.

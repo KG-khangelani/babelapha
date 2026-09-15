@@ -38,18 +38,21 @@ class DagTransparencyContractTests(unittest.TestCase):
                 self.assertEqual(set(dag.task_ids), set(contracted_tasks))
                 self.assertEqual(required_upstream_task_ids(dag_id), list(contracted_tasks[:-1]))
 
-    def test_every_v2_task_emits_success_failure_and_retry_evidence(self):
-        dag = self.bag.dags["ingest_pipeline_v2"]
+    def test_every_shipped_task_emits_success_failure_and_retry_evidence(self):
         callbacks = {
             "on_success_callback": "provenance_success_callback",
             "on_failure_callback": "provenance_failure_callback",
             "on_retry_callback": "provenance_retry_callback",
         }
-        for task in dag.tasks:
-            for attribute, expected_name in callbacks.items():
-                with self.subTest(task=task.task_id, callback=attribute):
-                    configured = getattr(task, attribute)
-                    self.assertEqual([callback.__name__ for callback in configured], [expected_name])
+        for dag_id in PIPELINE_TASK_CONTRACTS:
+            for task in self.bag.dags[dag_id].tasks:
+                for attribute, expected_name in callbacks.items():
+                    with self.subTest(dag=dag_id, task=task.task_id, callback=attribute):
+                        configured = getattr(task, attribute)
+                        self.assertEqual(
+                            [callback.__name__ for callback in configured],
+                            [expected_name],
+                        )
 
     def test_v2_rejects_missing_identity_and_marks_source_unverified(self):
         validate = self.bag.dags["ingest_pipeline_v2"].task_dict["validate_inputs"].python_callable

@@ -36,6 +36,31 @@ class MemoryS3:
 
         return Paginator()
 
+    def list_objects_v2(
+        self,
+        *,
+        Prefix,
+        Delimiter,
+        MaxKeys,
+        ContinuationToken=None,
+        **_kwargs,
+    ):
+        prefixes = sorted(
+            {
+                Prefix + key[len(Prefix) :].split(Delimiter, 1)[0] + Delimiter
+                for key in self.objects
+                if key.startswith(Prefix) and Delimiter in key[len(Prefix) :]
+            }
+        )
+        start = int(ContinuationToken or 0)
+        selected = prefixes[start : start + MaxKeys]
+        next_index = start + len(selected)
+        return {
+            "CommonPrefixes": [{"Prefix": prefix} for prefix in selected],
+            "IsTruncated": next_index < len(prefixes),
+            "NextContinuationToken": str(next_index) if next_index < len(prefixes) else None,
+        }
+
 
 def sample_record(
     *,
@@ -82,6 +107,45 @@ def sample_record(
 
 
 class ProvenanceInspectorTests(unittest.TestCase):
+    def test_catalog_lists_canonical_media_ids_with_pagination(self):
+        client = MemoryS3()
+        client.objects = {
+            "provenance/interview-001/run/task/1-succeeded.json": b"{}",
+            "provenance/interview%2F002/run/task/1-succeeded.json": b"{}",
+            "provenance/third%20item/run/task/1-succeeded.json": b"{}",
+        }
+
+        with mock.patch.object(inspector, "_s3_client", return_value=client):
+            first = inspector.list_media_items(limit=2)
+            second = inspector.list_media_items(cursor=first["next_cursor"], limit=2)
+
+        self.assertEqual(
+            [item["object_id"] for item in first["items"]],
+            ["interview/002", "interview-001"],
+        )
+        self.assertEqual(first["item_count"], 2)
+        self.assertEqual(first["next_cursor"], "2")
+        self.assertEqual(second["items"], [{"object_id": "third item"}])
+        self.assertIsNone(second["next_cursor"])
+        self.assertIn("interview/002", inspector.render_catalog_text(first))
+
+    def test_catalog_rejects_noncanonical_object_prefixes_and_invalid_limits(self):
+        class InvalidPrefixClient:
+            @staticmethod
+            def list_objects_v2(**_kwargs):
+                return {
+                    "CommonPrefixes": [{"Prefix": "provenance/lower%2fslash/"}],
+                    "IsTruncated": False,
+                }
+
+        with mock.patch.object(inspector, "_s3_client", return_value=InvalidPrefixClient()):
+            with self.assertRaisesRegex(ValueError, "Non-canonical"):
+                inspector.list_media_items()
+        for limit in (0, 201, True):
+            with self.subTest(limit=limit):
+                with self.assertRaisesRegex(ValueError, "between 1 and 200"):
+                    inspector.list_media_items(limit=limit)
+
     def test_text_view_exposes_required_milestone_evidence(self):
         records = [
             sample_record(),

@@ -89,6 +89,7 @@ The stack includes:
 - `airflow-webserver` + `airflow-scheduler`: local Airflow runtime.
 - `airflow-init`: one-time DB + admin user bootstrap.
 - `marquez` + `marquez-web`: OpenLineage ingestion and lineage graph UI.
+- `provenance-api`: read-only, versioned discovery and evidence API on port 8010.
 
 To run the pipeline:
 
@@ -131,7 +132,15 @@ s3://pachyderm/output/<id>/dash/*
    <http://localhost:3001>.
 
    ```powershell
+   docker compose run --rm provenance-inspect --list-objects
    docker compose run --rm provenance-inspect --object-id <id>
+   ```
+
+   The same canonical view is available over the local read-only API:
+
+   ```bash
+   curl http://localhost:8010/api/v1/media
+   curl http://localhost:8010/api/v1/media/sample-001
    ```
 
 Alternative event-driven path (closer to production):
@@ -150,6 +159,8 @@ This posts to the Airflow 3 webhook adapter and queues one deterministic
 Notes:
 
 - The compose stack is for **local development** and uses `airflow-local` mode.
+- The provenance API has no write routes. Keep it private in local development;
+  add deployment authentication and rate limiting before exposing it publicly.
 - The production-style `ingest_pipeline` DAG still requires Kubernetes (currently via `KubernetesPodOperator`) and Pachyderm webhook wiring.
 - The old `services/api` and `services/web` folders are not present in this checkout, so this compose currently focuses on the pipeline stack only.
 
