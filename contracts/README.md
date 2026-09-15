@@ -27,11 +27,14 @@ An outbox object without its matching delivery receipt is pending and can be
 replayed without rebuilding or changing the original event.
 
 `provenance-read-api-v1.openapi.json` versions the read-only explorer boundary.
-Version `1.3.0` provides an ordered stage-evidence ledger plus verified
-run-level and artifact-level identities. Consumers do not have to infer task
-topology, retries, missing evidence, or artifact reuse from an unordered set of
-manifests. Contradictory run facts or competing identities for the same
-artifact URI fail the read boundary.
+Version `1.4.0` adds opt-in, per-item catalog evidence summaries derived from
+the strict detail reader. The catalog can therefore expose readable items,
+missing evidence, and integrity conflicts before selection without maintaining
+an independent status store. The boundary also provides an ordered
+stage-evidence ledger plus verified run-level and artifact-level identities.
+Consumers do not have to infer task topology, retries, missing evidence, or
+artifact reuse from an unordered set of manifests. Contradictory run facts or
+competing identities for the same artifact URI fail the read boundary.
 
 Unknown-to-known legacy identity gaps remain readable as `PARTIAL` and name
 their missing fields. Immutable-contract violations and competing known facts

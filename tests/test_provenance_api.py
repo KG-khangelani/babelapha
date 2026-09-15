@@ -28,6 +28,20 @@ inspector = sys.modules["inspect_provenance"]
 provenance = sys.modules["provenance"]
 
 
+AVAILABLE_SUMMARY = {
+    "read_state": "AVAILABLE",
+    "object_filenames": ["interview.mp4"],
+    "run_count": 1,
+    "record_count": 2,
+    "latest_recorded_at": "2026-09-15T10:00:00Z",
+    "statuses_observed": ["FAILED", "RETRYING"],
+    "run_identity_completeness": "COMPLETE",
+    "artifact_node_count": 3,
+    "openlineage_state_counts": {"DELIVERED": 2},
+    "error": None,
+}
+
+
 class ProvenanceAPITests(unittest.TestCase):
     def test_openapi_contract_is_versioned_read_only_and_matches_routes(self):
         contract = api.read_openapi_contract()
@@ -68,8 +82,15 @@ class ProvenanceAPITests(unittest.TestCase):
             "item_count": 1,
             "next_cursor": None,
         }
-        with mock.patch.object(api, "list_media_items", return_value=catalog_data):
-            _, catalog = api.route_get("/api/v1/media")
+        with (
+            mock.patch.object(api, "list_media_items", return_value=catalog_data),
+            mock.patch.object(
+                api,
+                "_media_evidence_summary",
+                return_value=AVAILABLE_SUMMARY,
+            ),
+        ):
+            _, catalog = api.route_get("/api/v1/media?include=evidence-summary")
 
         record = provenance.build_manifest(
             object_id="interview/002",
@@ -121,7 +142,7 @@ class ProvenanceAPITests(unittest.TestCase):
         status, payload = api.route_get("/health")
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["api_version"], "1.3.0")
+        self.assertEqual(payload["api_version"], "1.4.0")
         self.assertEqual(payload["status"], "ok")
 
     def test_catalog_is_paginated_and_adds_canonical_detail_links(self):
@@ -148,6 +169,146 @@ class ProvenanceAPITests(unittest.TestCase):
             payload["data"]["next_href"],
             "/api/v1/media?limit=2&cursor=next%2B%2F%3Dtoken",
         )
+        self.assertTrue(
+            all("evidence_summary" not in item for item in payload["data"]["items"])
+        )
+
+    def test_catalog_optionally_includes_canonical_evidence_summaries(self):
+        catalog = {
+            "items": [{"object_id": "interview/002"}, {"object_id": "tampered"}],
+            "item_count": 2,
+            "next_cursor": "next+/=token",
+        }
+        integrity_summary = api._unavailable_media_summary(
+            state="INTEGRITY_FAILED",
+            code="EVIDENCE_INTEGRITY_FAILED",
+            message="conflicting SHA-256 values",
+        )
+        with (
+            mock.patch.object(api, "list_media_items", return_value=catalog),
+            mock.patch.object(
+                api,
+                "_media_evidence_summary",
+                side_effect=[AVAILABLE_SUMMARY, integrity_summary],
+            ) as summarize,
+        ):
+            status, payload = api.route_get(
+                "/api/v1/media?limit=2&cursor=current-token&include=evidence-summary"
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            [item["evidence_summary"] for item in payload["data"]["items"]],
+            [AVAILABLE_SUMMARY, integrity_summary],
+        )
+        self.assertEqual(
+            [call.args[0] for call in summarize.call_args_list],
+            ["interview/002", "tampered"],
+        )
+        self.assertEqual(
+            payload["data"]["next_href"],
+            "/api/v1/media?limit=2&cursor=next%2B%2F%3Dtoken&include=evidence-summary",
+        )
+
+    def test_catalog_summary_is_derived_from_the_strict_detail_view(self):
+        records = [{"manifest_id": "manifest-1"}, {"manifest_id": "manifest-2"}]
+        delivery = {"states": {}, "errors": []}
+        view = {
+            "run_count": 2,
+            "record_count": 2,
+            "openlineage_delivery": {"state_counts": {"DELIVERED": 1, "PENDING": 1}},
+            "runs": [
+                {
+                    "last_recorded_at": "2026-09-15T09:00:00Z",
+                    "statuses_observed": ["SUCCEEDED"],
+                    "run_identity": {
+                        "object_filename": "interview.mp4",
+                        "completeness": "COMPLETE",
+                    },
+                    "artifact_evidence": [{"uri": "s3://input"}],
+                },
+                {
+                    "last_recorded_at": "2026-09-15T10:00:00Z",
+                    "statuses_observed": ["FAILED", "RETRYING"],
+                    "run_identity": {
+                        "object_filename": "interview-v2.mp4",
+                        "completeness": "PARTIAL",
+                    },
+                    "artifact_evidence": [
+                        {"uri": "s3://output/one"},
+                        {"uri": "s3://output/two"},
+                    ],
+                },
+            ],
+        }
+        with (
+            mock.patch.object(api, "read_records", return_value=records) as read,
+            mock.patch.object(
+                api,
+                "read_openlineage_delivery_evidence",
+                return_value=delivery,
+            ) as lineage,
+            mock.patch.object(api, "build_view", return_value=view) as build,
+        ):
+            summary = api._media_evidence_summary("interview/002")
+
+        self.assertEqual(
+            summary,
+            {
+                "read_state": "AVAILABLE",
+                "object_filenames": ["interview-v2.mp4", "interview.mp4"],
+                "run_count": 2,
+                "record_count": 2,
+                "latest_recorded_at": "2026-09-15T10:00:00Z",
+                "statuses_observed": ["FAILED", "RETRYING", "SUCCEEDED"],
+                "run_identity_completeness": "PARTIAL",
+                "artifact_node_count": 3,
+                "openlineage_state_counts": {"DELIVERED": 1, "PENDING": 1},
+                "error": None,
+            },
+        )
+        read.assert_called_once_with(
+            object_id="interview/002",
+            endpoint_url=api.PROVENANCE_ENDPOINT,
+            bucket=api.PROVENANCE_BUCKET,
+        )
+        lineage.assert_called_once_with(
+            object_id="interview/002",
+            records=records,
+            endpoint_url=api.PROVENANCE_ENDPOINT,
+            bucket=api.PROVENANCE_BUCKET,
+        )
+        build.assert_called_once_with("interview/002", records, delivery)
+
+    def test_catalog_summary_distinguishes_missing_from_untrusted_evidence(self):
+        cases = (
+            (
+                [],
+                "EVIDENCE_NOT_FOUND",
+                0,
+                "EVIDENCE_NOT_FOUND",
+            ),
+            (
+                ValueError("conflicting SHA-256 values"),
+                "INTEGRITY_FAILED",
+                None,
+                "EVIDENCE_INTEGRITY_FAILED",
+            ),
+        )
+        for result, state, count, code in cases:
+            with self.subTest(state=state):
+                behavior = (
+                    {"side_effect": result}
+                    if isinstance(result, Exception)
+                    else {"return_value": result}
+                )
+                with mock.patch.object(api, "read_records", **behavior):
+                    summary = api._media_evidence_summary("problem")
+                self.assertEqual(summary["read_state"], state)
+                self.assertEqual(summary["run_count"], count)
+                self.assertEqual(summary["record_count"], count)
+                self.assertEqual(summary["artifact_node_count"], count)
+                self.assertEqual(summary["error"]["code"], code)
 
     def test_detail_reuses_strict_manifest_and_delivery_view(self):
         records = [{"manifest_id": "manifest-1"}]
@@ -167,7 +328,7 @@ class ProvenanceAPITests(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"api_version": "1.3.0", "data": view})
+        self.assertEqual(payload, {"api_version": "1.4.0", "data": view})
         read.assert_called_once_with(
             object_id="interview/002",
             run_id="manual__run 42",
@@ -187,6 +348,7 @@ class ProvenanceAPITests(unittest.TestCase):
         cases = (
             ("/api/v1/media?limit=1&limit=2", "INVALID_QUERY"),
             ("/api/v1/media?unknown=1", "INVALID_QUERY"),
+            ("/api/v1/media?include=everything", "INVALID_INCLUDE"),
             ("/api/v1/media?limit=0", "INVALID_LIMIT"),
             ("/api/v1/media/interview%2f002", "INVALID_OBJECT_ID"),
             ("/api/v1/media/interview-002?run_id=", "INVALID_RUN_ID"),

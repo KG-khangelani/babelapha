@@ -152,9 +152,16 @@ s3://pachyderm/output/<id>/dash/*
 
    ```bash
    curl http://localhost:8010/api/v1/media
+   curl 'http://localhost:8010/api/v1/media?include=evidence-summary'
    curl http://localhost:8010/api/v1/media/sample-001
    curl http://localhost:8010/api/v1/openapi.json
    ```
+
+   The opt-in catalog summary is derived live from the same canonical evidence
+   as the detail view. It exposes filenames, run and record counts, observed
+   statuses, run-identity completeness, artifact-node counts, OpenLineage
+   delivery states, and item-level integrity conflicts before selection. The
+   default catalog remains a lightweight identity listing.
 
    The media detail response includes an ordered `stage_evidence` ledger. It
    groups retries and terminal decisions by task and explicitly marks expected

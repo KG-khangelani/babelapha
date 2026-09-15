@@ -18,7 +18,7 @@ from inspect_provenance import (
 )
 
 
-API_VERSION = "1.3.0"
+API_VERSION = "1.4.0"
 API_PORT = int(os.environ.get("PROVENANCE_API_PORT", "8010"))
 PROVENANCE_BUCKET = os.environ.get("PROVENANCE_S3_BUCKET") or os.environ.get(
     "S3_BUCKET", "pachyderm"
@@ -84,6 +84,74 @@ def _media_href(object_id: str) -> str:
     return f"/api/v1/media/{urllib.parse.quote(object_id, safe='')}"
 
 
+def _unavailable_media_summary(*, state: str, code: str, message: str) -> dict:
+    """Return an explicit empty or untrusted catalog summary."""
+    unavailable = None if state == "INTEGRITY_FAILED" else 0
+    return {
+        "read_state": state,
+        "object_filenames": [],
+        "run_count": unavailable,
+        "record_count": unavailable,
+        "latest_recorded_at": None,
+        "statuses_observed": [],
+        "run_identity_completeness": None,
+        "artifact_node_count": unavailable,
+        "openlineage_state_counts": {},
+        "error": {"code": code, "message": message},
+    }
+
+
+def _media_evidence_summary(object_id: str) -> dict:
+    """Build a catalog summary directly from canonical validated evidence."""
+    try:
+        records = read_records(
+            object_id=object_id,
+            endpoint_url=PROVENANCE_ENDPOINT,
+            bucket=PROVENANCE_BUCKET,
+        )
+        if not records:
+            return _unavailable_media_summary(
+                state="EVIDENCE_NOT_FOUND",
+                code="EVIDENCE_NOT_FOUND",
+                message="No canonical provenance evidence found",
+            )
+        delivery = read_openlineage_delivery_evidence(
+            object_id=object_id,
+            records=records,
+            endpoint_url=PROVENANCE_ENDPOINT,
+            bucket=PROVENANCE_BUCKET,
+        )
+        view = build_view(object_id, records, delivery)
+    except ValueError as exc:
+        return _unavailable_media_summary(
+            state="INTEGRITY_FAILED",
+            code="EVIDENCE_INTEGRITY_FAILED",
+            message=str(exc),
+        )
+
+    runs = view["runs"]
+    return {
+        "read_state": "AVAILABLE",
+        "object_filenames": sorted(
+            {run["run_identity"]["object_filename"] for run in runs}
+        ),
+        "run_count": view["run_count"],
+        "record_count": view["record_count"],
+        "latest_recorded_at": max(run["last_recorded_at"] for run in runs),
+        "statuses_observed": sorted(
+            {status for run in runs for status in run["statuses_observed"]}
+        ),
+        "run_identity_completeness": (
+            "COMPLETE"
+            if all(run["run_identity"]["completeness"] == "COMPLETE" for run in runs)
+            else "PARTIAL"
+        ),
+        "artifact_node_count": sum(len(run["artifact_evidence"]) for run in runs),
+        "openlineage_state_counts": view["openlineage_delivery"]["state_counts"],
+        "error": None,
+    }
+
+
 def route_get(target: str) -> tuple[int, dict]:
     """Resolve one GET target without creating any independent status state."""
     parsed = urllib.parse.urlsplit(target)
@@ -123,10 +191,17 @@ def route_get(target: str) -> tuple[int, dict]:
         return 200, read_openapi_contract()
 
     if parsed.path == "/api/v1/media":
-        _validate_query(query, {"cursor", "limit"})
+        _validate_query(query, {"cursor", "include", "limit"})
         cursor = query.get("cursor", [None])[0]
         if cursor == "":
             raise APIError(400, "INVALID_CURSOR", "Cursor cannot be empty")
+        include = query.get("include", [None])[0]
+        if include not in (None, "evidence-summary"):
+            raise APIError(
+                400,
+                "INVALID_INCLUDE",
+                "Include must be 'evidence-summary' when provided",
+            )
         try:
             limit = int(query.get("limit", ["50"])[0])
         except ValueError as exc:
@@ -144,11 +219,14 @@ def route_get(target: str) -> tuple[int, dict]:
             raise
         for item in catalog["items"]:
             item["href"] = _media_href(item["object_id"])
+            if include == "evidence-summary":
+                item["evidence_summary"] = _media_evidence_summary(item["object_id"])
+        next_query = {"limit": limit, "cursor": catalog["next_cursor"]}
+        if include is not None:
+            next_query["include"] = include
         catalog["next_href"] = (
             "/api/v1/media?"
-            + urllib.parse.urlencode(
-                {"limit": limit, "cursor": catalog["next_cursor"]},
-            )
+            + urllib.parse.urlencode(next_query)
             if catalog["next_cursor"]
             else None
         )

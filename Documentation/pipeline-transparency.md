@@ -207,7 +207,7 @@ docker compose run --rm provenance-inspect --list-objects
 docker compose run --rm provenance-inspect --object-id <object-id>
 ```
 
-The versioned read-only HTTP boundary (currently `1.3.0`) exposes the same
+The versioned read-only HTTP boundary (currently `1.4.0`) exposes the same
 operations for the future explorer without giving a browser direct MinIO
 credentials:
 
@@ -216,8 +216,19 @@ GET /health
 GET /ready
 GET /api/v1/openapi.json
 GET /api/v1/media?limit=50&cursor=<opaque-token>
+GET /api/v1/media?include=evidence-summary
 GET /api/v1/media/<percent-encoded-object-id>?run_id=<run-id>
 ```
+
+`include=evidence-summary` keeps selection evidence-first without introducing
+a separate status database. For every catalog item, the API reuses the strict
+detail reader and reports canonical filenames, run and record counts, the
+latest evidence time, observed statuses, aggregate run-identity completeness,
+artifact-node count, and OpenLineage delivery-state counts. Invalid legacy or
+contradictory evidence remains visible as an item-level
+`INTEGRITY_FAILED` result with a stable error code; it does not make otherwise
+readable catalog items disappear. Omit `include` for the lightweight identity
+listing. Paginated `next_href` values retain the selected representation.
 
 Its JSON detail response is produced by the same strict manifest,
 OpenLineage-event, and delivery-receipt validation used by the CLI. It does not

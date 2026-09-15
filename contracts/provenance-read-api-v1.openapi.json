@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Babelapha Provenance Read API",
-    "version": "1.3.0",
-    "description": "Read-only discovery and validated views over canonical provenance manifests, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
+    "version": "1.4.0",
+    "description": "Read-only discovery and validated views over canonical provenance manifests, catalog evidence health, verified run and artifact identities, ordered stage evidence, and immutable OpenLineage delivery evidence."
   },
   "servers": [
     {
@@ -75,6 +75,13 @@
             "required": false,
             "description": "Opaque S3 continuation token. Prefer the encoded next_href returned by the preceding page.",
             "schema": {"type": "string", "minLength": 1}
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "description": "Opt in to a summary derived live from the same canonical evidence as the detail view.",
+            "schema": {"const": "evidence-summary"}
           }
         ],
         "responses": {
@@ -160,7 +167,7 @@
         "additionalProperties": false,
         "required": ["api_version", "service", "status"],
         "properties": {
-          "api_version": {"const": "1.3.0"},
+          "api_version": {"const": "1.4.0"},
           "service": {"const": "babelapha-provenance-api"},
           "status": {"enum": ["ok", "ready"]}
         }
@@ -170,7 +177,7 @@
         "additionalProperties": false,
         "required": ["api_version", "error"],
         "properties": {
-          "api_version": {"const": "1.3.0"},
+          "api_version": {"const": "1.4.0"},
           "error": {
             "type": "object",
             "additionalProperties": false,
@@ -187,7 +194,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.3.0"},
+          "api_version": {"const": "1.4.0"},
           "data": {"$ref": "#/components/schemas/Catalog"}
         }
       },
@@ -211,7 +218,50 @@
         "required": ["object_id", "href"],
         "properties": {
           "object_id": {"type": "string", "minLength": 1},
-          "href": {"type": "string", "pattern": "^/api/v1/media/"}
+          "href": {"type": "string", "pattern": "^/api/v1/media/"},
+          "evidence_summary": {"$ref": "#/components/schemas/CatalogEvidenceSummary"}
+        }
+      },
+      "CatalogEvidenceSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["read_state", "object_filenames", "run_count", "record_count", "latest_recorded_at", "statuses_observed", "run_identity_completeness", "artifact_node_count", "openlineage_state_counts", "error"],
+        "properties": {
+          "read_state": {"enum": ["AVAILABLE", "EVIDENCE_NOT_FOUND", "INTEGRITY_FAILED"]},
+          "object_filenames": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "run_count": {"type": ["integer", "null"], "minimum": 0},
+          "record_count": {"type": ["integer", "null"], "minimum": 0},
+          "latest_recorded_at": {"type": ["string", "null"], "format": "date-time"},
+          "statuses_observed": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"enum": ["SUCCEEDED", "FAILED", "RETRYING", "SKIPPED"]}
+          },
+          "run_identity_completeness": {"enum": ["COMPLETE", "PARTIAL", null]},
+          "artifact_node_count": {"type": ["integer", "null"], "minimum": 0},
+          "openlineage_state_counts": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 1}
+          },
+          "error": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "#/components/schemas/CatalogEvidenceError"}
+            ]
+          }
+        }
+      },
+      "CatalogEvidenceError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"enum": ["EVIDENCE_NOT_FOUND", "EVIDENCE_INTEGRITY_FAILED"]},
+          "message": {"type": "string", "minLength": 1}
         }
       },
       "ProvenanceEnvelope": {
@@ -219,7 +269,7 @@
         "additionalProperties": false,
         "required": ["api_version", "data"],
         "properties": {
-          "api_version": {"const": "1.3.0"},
+          "api_version": {"const": "1.4.0"},
           "data": {"$ref": "#/components/schemas/ProvenanceView"}
         }
       },
