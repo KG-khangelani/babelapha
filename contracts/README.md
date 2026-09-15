@@ -8,9 +8,14 @@ provenance/<object-id>/<dag-run-id>/<task-id>/<attempt>-<status>.json
 ```
 
 The task callbacks emit the same run, decision, input, output, code, and
-container identities as OpenLineage events. `reports/<object-id>/*.json` files
-remain mutable operational summaries for compatibility; they are not the
-provenance source of truth.
+container identities as OpenLineage events. The execution fields use
+`openlineage-babelapha-execution-run-facet-v2.schema.json`; every input and
+output dataset uses `openlineage-babelapha-artifact-dataset-facet-v1.schema.json`.
+The event schema URLs are pinned to the Git commit containing those contracts,
+not to a mutable branch.
+
+`reports/<object-id>/*.json` files remain mutable operational summaries for
+compatibility; they are not the provenance source of truth.
 
 Integrity is explicit. An artifact with a SHA-256 is `VERIFIED`; a source that
 could not be hashed is `UNVERIFIED`. Likewise, a container is
