@@ -15,7 +15,7 @@ description: |
   expanded with NLP clean-up, timestamp correction, and metadata enrichment.
 
 transform:
-  image: alpine:3.19
+  image: alpine:3.24.1
   cmd:
     - /bin/sh
     - -c

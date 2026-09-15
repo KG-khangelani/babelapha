@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
       - name: webhook
-        image: python:3.11-slim
+        image: python:3.11.16-slim-bookworm
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000

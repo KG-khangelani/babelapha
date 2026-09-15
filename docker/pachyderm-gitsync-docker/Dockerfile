@@ -1,4 +1,4 @@
-FROM alpine:3.19
+FROM alpine:3.24.1
 
 # Install dependencies
 RUN apk add --no-cache \
@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     ca-certificates
 
 # Install pachctl
-ARG PACH_VERSION=2.8.0
+ARG PACH_VERSION=2.12.2
 RUN curl -o /tmp/pachctl.tar.gz -L \
     https://github.com/pachyderm/pachyderm/releases/download/v${PACH_VERSION}/pachctl_${PACH_VERSION}_linux_amd64.tar.gz && \
     tar -xzf /tmp/pachctl.tar.gz -C /tmp && \

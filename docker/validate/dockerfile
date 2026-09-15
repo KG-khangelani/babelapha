@@ -1,5 +1,5 @@
 # file: docker/validate/Dockerfile
-FROM docker.io/jrottenberg/ffmpeg:6.1-ubuntu
+FROM docker.io/jrottenberg/ffmpeg:8.0.3-ubuntu2404
 RUN apt-get update && apt-get install -y \
     mediainfo \
     python3 \
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pachctl for Pachyderm operations
-RUN curl -L -o /usr/local/bin/pachctl https://github.com/pachyderm/pachyderm/releases/download/v2.8.0/pachctl_2.8.0_linux_amd64 \
+RUN curl -L -o /usr/local/bin/pachctl https://github.com/pachyderm/pachyderm/releases/download/v2.12.2/pachctl_2.12.2_linux_amd64 \
     && chmod +x /usr/local/bin/pachctl
 
 COPY utils/ /app/utils/

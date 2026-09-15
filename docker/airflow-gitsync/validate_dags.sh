@@ -6,13 +6,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip install --upgrade pip setuptools wheel
-pip install "apache-airflow==2.9.1" \
+pip install "apache-airflow==3.3.1" \
+  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.11.txt" \
   --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt"
 
 # Install providers used in DAGs
 pip install \
-  apache-airflow-providers-cncf-kubernetes \
-  apache-airflow-providers-amazon
+  "apache-airflow-providers-cncf-kubernetes==10.21.0" \
+  "apache-airflow-providers-amazon==9.34.0"
 
 echo "==> Validating DAG syntax"
 python - <<'PYEOF'
