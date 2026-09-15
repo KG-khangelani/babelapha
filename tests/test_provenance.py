@@ -104,6 +104,21 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertIsNone(record["execution"]["container"]["digest"])
         self.assertEqual(record["execution"]["container"]["identity_status"], "CONFIGURED_REF_ONLY")
 
+    def test_embedded_and_configured_container_digests_cannot_conflict(self):
+        with self.assertRaisesRegex(
+            provenance.ManifestValidationError,
+            "conflicts with the image reference",
+        ):
+            self.sample_manifest(
+                container_image="registry/transcode@sha256:" + "a" * 64,
+                container_digest="sha256:" + "b" * 64,
+            )
+        with self.assertRaisesRegex(
+            provenance.ManifestValidationError,
+            "must be sha256",
+        ):
+            self.sample_manifest(container_digest="not-a-digest")
+
     def test_runtime_validation_rejects_extra_fields_and_false_identity_claims(self):
         extra = self.sample_manifest()
         extra["unexpected"] = True
@@ -200,7 +215,16 @@ class ProvenanceContractTests(unittest.TestCase):
             {"BABELAPHA_RUN_VIRUS_SCAN_IMAGE_DIGEST": "sha256:" + "e" * 64},
             clear=False,
         ):
-            pinned = provenance.build_airflow_manifest(context, "SUCCEEDED")
+            asserted = provenance.build_airflow_manifest(context, "SUCCEEDED")
+        self.assertIsNone(asserted["execution"]["container"]["digest"])
+        self.assertEqual(
+            asserted["execution"]["container"]["identity_status"],
+            "CONFIGURED_REF_ONLY",
+        )
+
+        task.image = "python@sha256:" + "e" * 64
+        pinned = provenance.build_airflow_manifest(context, "SUCCEEDED")
+        self.assertEqual(pinned["execution"]["container"]["image"], "python")
         self.assertEqual(pinned["execution"]["container"]["digest"], "sha256:" + "e" * 64)
         self.assertEqual(pinned["execution"]["container"]["identity_status"], "VERIFIED_DIGEST")
 

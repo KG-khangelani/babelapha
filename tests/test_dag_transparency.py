@@ -79,6 +79,43 @@ class DagTransparencyContractTests(unittest.TestCase):
         self.assertIsNone(source["sha256"])
         self.assertEqual(source["version"]["pachyderm_commit"], "pach-42")
 
+    def test_production_dag_refuses_mutable_processing_images(self):
+        validate = self.bag.dags["ingest_pipeline"].task_dict["validate_inputs"].python_callable
+        context = {
+            "dag_run": SimpleNamespace(
+                conf={"id": "item-17", "filename": "clip.mp4", "pachyderm_commit": "pach-42"}
+            )
+        }
+        base_globals = {
+            "get_current_context": lambda: context,
+            "MINIO_ACCESS_KEY": "access",
+            "MINIO_SECRET_KEY": "secret",
+        }
+        with mock.patch.dict(
+            validate.__globals__,
+            {
+                **base_globals,
+                "SCAN_IMAGE": "registry/scan:latest",
+                "VALIDATE_IMAGE": "registry/validate@sha256:" + "a" * 64,
+                "TRANSCODE_IMAGE": "registry/transcode@sha256:" + "b" * 64,
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "BABELAPHA_SCAN_IMAGE"):
+                validate()
+
+        with mock.patch.dict(
+            validate.__globals__,
+            {
+                **base_globals,
+                "SCAN_IMAGE": "registry/scan@sha256:" + "c" * 64,
+                "VALIDATE_IMAGE": "registry/validate@sha256:" + "a" * 64,
+                "TRANSCODE_IMAGE": "registry/transcode@sha256:" + "b" * 64,
+            },
+        ):
+            payload = validate()
+        self.assertEqual(payload["object_id"], "item-17")
+        self.assertEqual(payload["pachyderm_commit"], "pach-42")
+
     def test_v2_gate_validates_every_exact_upstream_pair(self):
         dag = self.bag.dags["ingest_pipeline_v2"]
         gate = dag.task_dict["verify_provenance"].python_callable

@@ -15,6 +15,7 @@ from airflow.sdk import dag, get_current_context, task
 from provenance import (
     artifact,
     assert_success_manifests,
+    is_digest_pinned_image,
     provenance_failure_callback,
     provenance_retry_callback,
     provenance_success_callback,
@@ -83,6 +84,20 @@ def _processing_env() -> dict[str, str]:
     }
 
 
+def _require_digest_pinned_processing_images() -> None:
+    images = {
+        "BABELAPHA_SCAN_IMAGE": SCAN_IMAGE,
+        "BABELAPHA_VALIDATE_IMAGE": VALIDATE_IMAGE,
+        "BABELAPHA_TRANSCODE_IMAGE": TRANSCODE_IMAGE,
+    }
+    mutable = [f"{name}={image}" for name, image in images.items() if not is_digest_pinned_image(image)]
+    if mutable:
+        raise RuntimeError(
+            "Production processing images must be pinned in their Kubernetes references: "
+            + ", ".join(mutable)
+        )
+
+
 SOURCE_XCOM = r"""
 import json, os
 source = {
@@ -120,6 +135,7 @@ def ingest_pipeline():
         filename = str(conf.get("filename", "")).strip()
         if not object_id or not filename:
             raise ValueError(f"Missing required parameters: id={object_id}, filename={filename}")
+        _require_digest_pinned_processing_images()
         if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
             raise RuntimeError("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be injected by the deployment")
         input_key = f"incoming/{object_id}/{filename}"

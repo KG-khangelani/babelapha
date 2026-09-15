@@ -79,6 +79,12 @@ Container identity is deliberately honest:
 - a mutable tag such as `localhost/transcode:latest` produces
   `CONFIGURED_REF_ONLY`.
 
+The production DAG fails its first task before media processing when any scan,
+validation, or transcode pod image is not pinned directly in its Kubernetes
+image reference. A separate environment variable cannot upgrade a mutable pod
+tag to verified identity, because that would not prove which bytes Kubernetes
+actually pulled. Conflicting or malformed configured digests are rejected.
+
 For production, set these variables to digest-pinned references:
 
 ```text
@@ -92,9 +98,8 @@ For local Airflow, inject the result of `docker image inspect` as
 `BABELAPHA_RUNTIME_IMAGE_DIGEST` when exact container reproduction is required.
 That digest applies only to tasks executing inside the Airflow container. A
 Kubernetes pod task never inherits it: the pod image must contain its own
-`@sha256:` digest or have a task-specific
-`BABELAPHA_<TASK_ID>_IMAGE_DIGEST` value. Otherwise it remains honestly marked
-`CONFIGURED_REF_ONLY`.
+`@sha256:` digest. Otherwise it remains honestly marked
+`CONFIGURED_REF_ONLY`; the production preflight then prevents it from running.
 Set `BABELAPHA_GIT_SHA` to the full 40- or 64-character commit SHA. Short or
 symbolic refs are not accepted as exact identities. The DAG-file SHA-256 remains
 exact even in an uncommitted local working tree. The production DAG sync also

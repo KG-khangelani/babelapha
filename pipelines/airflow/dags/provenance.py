@@ -271,14 +271,34 @@ def canonical_json_bytes(record: dict) -> bytes:
     return (json.dumps(record, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def image_ref_digest(image: str) -> tuple[str, str | None]:
+    """Return the configured image name and an embedded registry digest, if exact."""
+    if not isinstance(image, str) or not image.strip():
+        return image, None
+    if "@" not in image:
+        return image, None
+    name, digest = image.rsplit("@", 1)
+    if name and DIGEST_RE.fullmatch(digest):
+        return name, digest
+    return image, None
+
+
+def is_digest_pinned_image(image: str) -> bool:
+    """True only when Kubernetes can pull the configured reference by digest."""
+    return image_ref_digest(image)[1] is not None
+
+
 def _container_identity(image: str, explicit_digest: str | None = None) -> dict:
+    image, embedded_digest = image_ref_digest(image)
     digest = explicit_digest
-    if "@sha256:" in image:
-        image, digest_part = image.rsplit("@", 1)
-        digest = digest or digest_part
     if digest and not digest.startswith("sha256:"):
         digest = f"sha256:{digest}"
-    verified = bool(digest and DIGEST_RE.fullmatch(digest))
+    if digest and not DIGEST_RE.fullmatch(digest):
+        raise ManifestValidationError("Configured container digest must be sha256:<64 lowercase hex>")
+    if embedded_digest and digest and embedded_digest != digest:
+        raise ManifestValidationError("Configured container digest conflicts with the image reference")
+    digest = embedded_digest or digest
+    verified = digest is not None
     return {
         "image": image,
         "digest": digest if verified else None,
@@ -1153,11 +1173,12 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             "message": decision.get("message", "Task completed successfully"),
         }
     code_path, code_sha = _dag_code_identity(context)
-    task_env_key = re.sub(r"[^A-Z0-9]", "_", task_id.upper())
     task_image = getattr(task, "image", None)
     if task_image:
         image = str(task_image)
-        digest = os.environ.get(f"BABELAPHA_{task_env_key}_IMAGE_DIGEST")
+        # A pod is only reproducible when Kubernetes pulled image@sha256:...
+        # A separate environment claim cannot upgrade a mutable task image.
+        digest = None
     else:
         image = os.environ.get("BABELAPHA_RUNTIME_IMAGE", "apache-airflow")
         digest = os.environ.get("BABELAPHA_RUNTIME_IMAGE_DIGEST")
