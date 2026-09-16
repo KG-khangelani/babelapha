@@ -55,6 +55,21 @@ and an **interactive provenance explorer** so anyone can visually trace how each
 
 ## Getting Started (Local Dev)
 
+### Local Mathematica analysis
+
+The Wolfram-first prototype runs independently of the Docker pipeline stack.
+Put exactly one local video in `Local-prototype/ingest/`, then run:
+
+```powershell
+.\scripts\Invoke-MathematicaLocalPrototype.ps1
+```
+
+It uses an explicitly identified local Version 15-or-newer kernel and keeps
+generated material in the gitignored `Local-prototype/artefacts`, `output`,
+`logs`, and `work` directories. See [the local workspace
+guide](Local-prototype/README.md) for the folder contract, runtime preflight,
+and override options.
+
 ### 1. Run the API
 
 ```bash
@@ -257,8 +272,8 @@ The implemented provenance contract, failure semantics, OpenLineage mapping,
 and exact-identity configuration are documented in
 [`Documentation/pipeline-transparency.md`](Documentation/pipeline-transparency.md).
 
-The architecture assessment for using Mathematica/Wolfram Language as an
-optional research environment and provenance-bearing analysis stage is in
+The implemented Wolfram-first local media lab, its newer Mathematica features,
+and the deferred production decision are documented in
 [`Documentation/mathematica/`](Documentation/mathematica/README.md).
 
 ## Continuous Integration

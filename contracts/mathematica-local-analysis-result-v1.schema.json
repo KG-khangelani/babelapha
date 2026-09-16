@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/mathematica-local-analysis-result-v1.schema.json",
+  "title": "Babelapha Mathematica local analysis result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analysis_id",
+    "object_id",
+    "run_id",
+    "processor",
+    "source",
+    "evidence",
+    "parameters",
+    "capabilities",
+    "measurements",
+    "provenance_summary",
+    "outputs"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "analysis_id": {"const": "mathematica-local-media-lab-v1"},
+    "object_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "processor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "wolfram_version", "system_id", "package_sha256", "network_mode"],
+      "properties": {
+        "name": {"const": "BabelaphaAnalysis"},
+        "wolfram_version": {"type": "string", "pattern": "^(1[5-9]|[2-9][0-9]|[1-9][0-9]{2,})\\."},
+        "system_id": {"type": "string", "minLength": 1},
+        "package_sha256": {"$ref": "#/$defs/sha256"},
+        "network_mode": {"const": "disabled"}
+      }
+    },
+    "source": {"$ref": "#/$defs/source"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"const": "artefacts/source-evidence.json"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "parameters": {"$ref": "#/$defs/parameters"},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "video_import",
+        "audio_track",
+        "video_summary_plot",
+        "frame_analysis",
+        "time_series",
+        "event_series",
+        "tabular",
+        "notebook_export"
+      ],
+      "properties": {
+        "video_import": {"$ref": "#/$defs/capability"},
+        "audio_track": {"$ref": "#/$defs/capability"},
+        "video_summary_plot": {"$ref": "#/$defs/capability"},
+        "frame_analysis": {"$ref": "#/$defs/capability"},
+        "time_series": {"$ref": "#/$defs/capability"},
+        "event_series": {"$ref": "#/$defs/capability"},
+        "tabular": {"$ref": "#/$defs/capability"},
+        "notebook_export": {"$ref": "#/$defs/capability"}
+      }
+    },
+    "measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_seconds",
+        "audio_duration_seconds",
+        "sample_rate_hz",
+        "channel_count",
+        "rms_amplitude",
+        "peak_amplitude",
+        "integrated_loudness_lufs",
+        "audible_intervals_seconds",
+        "silence_intervals_seconds",
+        "spectral_centroid_hz",
+        "measurement_series",
+        "evidence_events",
+        "tabular_summary",
+        "video"
+      ],
+      "properties": {
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "audio_duration_seconds": {"type": ["number", "null"], "exclusiveMinimum": 0.0},
+        "sample_rate_hz": {"type": ["integer", "null"], "minimum": 1},
+        "channel_count": {"type": ["integer", "null"], "minimum": 1},
+        "rms_amplitude": {"type": ["number", "null"], "minimum": 0.0},
+        "peak_amplitude": {"type": ["number", "null"], "minimum": 0.0},
+        "integrated_loudness_lufs": {"type": ["number", "null"]},
+        "audible_intervals_seconds": {"$ref": "#/$defs/intervals"},
+        "silence_intervals_seconds": {"$ref": "#/$defs/intervals"},
+        "spectral_centroid_hz": {"$ref": "#/$defs/nullableSummary"},
+        "measurement_series": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["time_count", "component_names"],
+          "properties": {
+            "time_count": {"type": "integer", "minimum": 0},
+            "component_names": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "evidence_events": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_count", "event_types"],
+          "properties": {
+            "event_count": {"type": "integer", "minimum": 2},
+            "event_types": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "tabular_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["row_count", "column_names"],
+          "properties": {
+            "row_count": {"type": "integer", "minimum": 2},
+            "column_names": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "video": {"$ref": "#/$defs/videoMeasurements"}
+      }
+    },
+    "provenance_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_count", "artifact_count", "integrity_conflict_count", "evidence_sha256"],
+      "properties": {
+        "task_count": {"type": "integer", "minimum": 2},
+        "artifact_count": {"type": "integer", "minimum": 1},
+        "integrity_conflict_count": {"const": 0},
+        "evidence_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/output"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["USED", "UNAVAILABLE", "NOT_APPLICABLE"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^ingest/[^/\\\\]+$"},
+        "filename": {"type": "string", "pattern": "^[^/\\\\]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"type": "string", "pattern": "^video/[A-Za-z0-9.+-]+$"}
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["silence_threshold_db", "frame_seconds", "hop_seconds", "random_seed"],
+      "properties": {
+        "silence_threshold_db": {"type": "number", "minimum": -120.0, "maximum": 0.0},
+        "frame_seconds": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 10.0},
+        "hop_seconds": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 10.0},
+        "random_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    "intervals": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {"type": "number", "minimum": 0.0},
+          {"type": "number", "minimum": 0.0}
+        ],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "mean", "maximum"],
+      "properties": {
+        "minimum": {"type": "number", "minimum": 0.0},
+        "mean": {"type": "number", "minimum": 0.0},
+        "maximum": {"type": "number", "minimum": 0.0}
+      }
+    },
+    "nullableSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "mean", "maximum"],
+      "properties": {
+        "minimum": {"type": ["number", "null"], "minimum": 0.0},
+        "mean": {"type": ["number", "null"], "minimum": 0.0},
+        "maximum": {"type": ["number", "null"], "minimum": 0.0}
+      }
+    },
+    "videoMeasurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_seconds",
+        "frame_count_sampled",
+        "frame_dimensions",
+        "brightness",
+        "mean_rgb",
+        "motion"
+      ],
+      "properties": {
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "frame_count_sampled": {"type": "integer", "minimum": 1},
+        "frame_dimensions": {
+          "type": "array",
+          "prefixItems": [
+            {"type": "integer", "minimum": 1},
+            {"type": "integer", "minimum": 1}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "brightness": {"$ref": "#/$defs/unitSummary"},
+        "mean_rgb": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["red", "green", "blue"],
+          "properties": {
+            "red": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "green": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "blue": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+          }
+        },
+        "motion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "transition_count", "mean", "maximum"],
+          "properties": {
+            "method": {"const": "mean-absolute-grayscale-frame-difference"},
+            "transition_count": {"type": "integer", "minimum": 0},
+            "mean": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0},
+            "maximum": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0}
+          }
+        }
+      }
+    },
+    "unitSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "mean", "maximum"],
+      "properties": {
+        "minimum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "mean": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "maximum": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "media_type", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"},
+        "media_type": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

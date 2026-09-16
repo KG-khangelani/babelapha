@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/mathematica-local-source-evidence-v1.schema.json",
+  "title": "Babelapha Mathematica local source evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_type",
+    "canonicalization",
+    "object_id",
+    "run_id",
+    "source",
+    "events"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "evidence_type": {"const": "BABELAPHA_LOCAL_SOURCE_V1"},
+    "canonicalization": {"const": "SORTED_INDENTED_JSON_V1"},
+    "object_id": {
+      "type": "string",
+      "pattern": "^local-[a-z0-9][a-z0-9-]{0,80}-[a-f0-9]{12}$"
+    },
+    "run_id": {"type": "string", "pattern": "^local-[a-f0-9]{16}$"},
+    "source": {"$ref": "#/$defs/source"},
+    "events": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/event"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^ingest/[^/\\\\]+$"
+        },
+        "filename": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {
+          "type": "string",
+          "pattern": "^video/[A-Za-z0-9.+-]+$"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "event_type", "stage", "status", "artifact_count"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "event_type": {
+          "enum": ["SOURCE_DISCOVERED", "SOURCE_HASH_VERIFIED"]
+        },
+        "stage": {"enum": ["ingest", "prepare"]},
+        "status": {"const": "SUCCEEDED"},
+        "artifact_count": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

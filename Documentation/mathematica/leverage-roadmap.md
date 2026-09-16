@@ -1,142 +1,96 @@
 # Mathematica leverage roadmap
 
-## Goal
+## Direction
 
-Use Mathematica where its current capabilities create a distinct research or
-explanatory advantage, while preserving Babelapha's portable artifacts,
-Airflow control plane, immutable provenance, and Python verification boundary.
-
-```mermaid
-flowchart LR
-    A[Verified evidence bundle] --> B[Typed Tabular adapter]
-    C[Immutable source media] --> D[Audio and video measurements]
-    B --> E[TimeSeries and EventSeries model]
-    D --> E
-    E --> F[Diagnostic models and visualizations]
-    F --> G[Canonical JSON]
-    F --> H[PNG SVG and review Markdown]
-    G --> I[MinIO analysis artifacts]
-    H --> I
-    I --> J[Existing manifest and OpenLineage evidence]
-```
-
-## Phase 1 — Version 15 local spike
-
-Purpose: prove that current Wolfram features improve the existing
-audio/provenance pilot before introducing Airflow or container complexity.
-
-Deliverables:
-
-- a Version 15 Structured Package Format package;
-- typed exceptions mapped to documented exit codes and reason codes;
-- an evidence adapter that converts a verifier-approved bundle to `Tabular`;
-- named `TimeSeries` components for audio measurements;
-- an `EventSeries` representation of task attempts and decisions;
-- Wolfram `result.raw.json`, PNG/SVG plots, and optional Markdown review export;
-- Wolfram unit tests plus a Python verifier that validates and canonicalizes
-  `result.raw.json` as `result.json`;
-- the equivalent Python baseline from the existing pilot design.
-
-Exit gate: repeatable headless results, notebook/headless parity, portable
-outputs, and a measurable advantage over Python. No cloud, LLM, speech service,
-MCP, or production license is required for this pre-production spike.
-
-## Phase 2 — Optional Airflow analysis DAG
-
-Purpose: prove operational fit without changing ingestion success semantics.
-
-Proposed task contract:
+Exhaust the analytical and authoring value of Mathematica locally before
+introducing orchestration, storage, or cloud complexity. The implemented local
+media lab is the foundation; Python remains only the independent trust boundary.
 
 ```mermaid
 flowchart LR
-    V[verify_evidence_bundle] --> P[prepare_analysis_input]
-    P --> W[run_wolfram_analysis]
-    W --> R[validate_result_contract]
-    R --> U[upload_analysis_artifacts]
-    U --> C[mark_analysis_complete]
-    C --> G[verify_provenance]
+    V[Local source video] --> M[Wolfram Video and Audio]
+    E[Verified source events] --> D[EventSeries and Tabular]
+    M --> T[Named TimeSeries]
+    D --> X[Cross-domain Mathematica analysis]
+    T --> X
+    X --> A[Plots reports notebook]
+    X --> J[Portable JSON]
+    A --> G[Independent Python gate]
+    J --> G
 ```
 
-Requirements:
+## Foundation — implemented and verified
 
-- a separately triggered `analyze_media_wolfram` DAG;
-- an exact Wolfram kernel version and runtime image digest;
-- offline resource inventory and runtime network denial;
-- a license preflight before work is accepted;
-- an Airflow pool matching permitted kernel concurrency;
-- immutable result, visualization, verifier, code, and dependency identities;
-- no change to the successful status of the source ingestion run.
+The current branch now provides:
 
-Exit gate: the complete analysis task contract passes the same immutable
-manifest/OpenLineage verification standard as shipped ingestion DAGs.
+- the `Local-prototype/{ingest,artefacts,output,logs,work}` workspace;
+- one-command local execution through
+  `scripts/Invoke-MathematicaLocalPrototype.ps1`;
+- explicit discovery and recording of an exact Wolfram Language 15+ kernel;
+- a Structured Package Format package with registered typed exceptions;
+- direct Wolfram `Video` and `Audio` import and analysis;
+- frame/color/motion, loudness, interval, and spectral measurements;
+- named `TimeSeries`, provenance `EventSeries`, and `Tabular` representations;
+- seven hashed Wolfram outputs, including HTML/Markdown reports and a notebook;
+- strict Python input/evidence preparation and output canonicalization only;
+- independent package-hash binding and an optional two-run repeatability gate;
+- Wolfram unit tests, Python boundary tests, repeatable audio/video execution,
+  and a successful no-audio fallback run on Engine 15.0.0 for Windows x86-64.
 
-The branch already supplies the strict JSON `provenance_parameters` path
-needed to carry processor-specific facts into manifests and OpenLineage. Remaining
-integration prerequisites are:
+## Next — deepen local Mathematica use
 
-- preserve an allowlisted typed failure reason from the Wolfram adapter rather
-  than reducing every failed callback to `TASK_FAILED`;
-- construct the evidence-bundle URL from validated object/run identifiers
-  inside the DAG rather than accept an arbitrary user URL;
-- validate and canonicalize raw Wolfram JSON in Python before publication;
-- add the new DAG to `PIPELINE_TASK_CONTRACTS` only when all tasks exist;
-- run Wolfram in a separate runtime because the Airflow image intentionally
-  contains no Wolfram Engine.
+Add experiments as separate, versioned analyses rather than optional switches
+inside the existing result contract.
 
-## Phase 3 — Media and transcript research
+1. **Video dynamics:** extend sampled-frame analysis with feature tracking,
+   stabilization diagnostics, scene/shot structure, richer motion fields, and
+   comparative visual summaries.
+2. **Audio structure:** add frequency-band energy, pitch/harmonic analysis,
+   transient and silence segmentation, channel comparisons, and interactive
+   interval inspection in the notebook.
+3. **Cross-modal alignment:** align frame and audio measurements on shared time
+   axes and use Wolfram temporal objects to identify correlated changes.
+4. **Statistical explanation:** use symbolic/statistical models and
+   `ModelFitReport` where they improve interpretation, while recording model
+   definitions and producing portable coefficient/diagnostic summaries.
+5. **Provenance exploration:** turn richer local evidence into graph and
+   temporal views without replacing canonical source/evidence JSON.
+6. **Notebook research surface:** make the generated notebook the inspectable
+   local lab for drilling into measurements and rerunning the shared package;
+   production calculations must stay in package code.
+7. **Transcript/text research:** only after a canonical local transcript exists,
+   evaluate temporal alignment, entity/text analysis, and semantic retrieval as
+   explicitly identified processors.
 
-Purpose: use the newer multimodal and semantic capabilities only where the
-underlying canonical artifacts exist.
+Every experiment must identify its input bytes, exact kernel and package hash,
+parameters, outputs, and capabilities used. Cloud functions, implicit model
+downloads, LLM calls, and speech services remain off unless introduced as a
+separate, reviewable experiment.
 
-Candidate experiments, in order:
+## Local adoption gates
 
-1. sampled-frame stability and feature-motion analysis using Version 14.3+
-   video functions;
-2. speaker/speech interval research with explicitly identified local or
-   external processors;
-3. transcript `Tabular`/`EventSeries` alignment with media timestamps;
-4. semantic search and reranking over canonical transcript segments;
-5. `ModelFitReport` diagnostics for pipeline latency and media-quality trends.
+A local experiment graduates into the shared package only when:
 
-Each experiment gets its own `analysis_id`, result contract, dependency
-inventory, Python comparator, and adoption decision. Do not grow one generic
-analysis stage with hidden optional behavior.
+- it adds a clear analytical or explanatory capability;
+- reruns use the same package path as the generated notebook;
+- outputs are portable and independently hash-verifiable;
+- failures are typed and no partial result is canonicalized;
+- a new wire shape receives a new schema/analysis version;
+- the exact Wolfram runtime and dependencies are recorded.
 
-## Phase 4 — Read-only MCP exploration
+## Deferred — operational integration
 
-Purpose: let an AI client ask bounded computational questions over verified
-evidence without granting it pipeline authority.
+Airflow scheduling, MinIO publication, container images, OpenLineage emission,
+MCP serving, and unattended licensing are future decisions, not work required
+for the current local lab. If local evidence later justifies productionization,
+the first operational step is a separately triggered optional analysis DAG;
+Wolfram must never become a prerequisite for successful ingestion.
 
-The MCP surface is limited to pure/read-only tools. Every response includes
-the object ID, run ID, evidence-set SHA-256, analysis version, and source URIs.
-No tool can trigger ingestion, modify MinIO, change an Airflow run, publish an
-artifact, or assert an unverified interpretation as canonical fact.
-
-Exit gate: threat review, authentication, rate/resource limits, audit logging,
-prompt-injection tests, and proof that the same answer can be reproduced by a
-direct non-MCP call to the underlying versioned function.
-
-## Phase 5 — Production packaging decision
-
-Choose one deployment model only after the preceding phases provide measured
-usage and concurrency:
-
-- licensed Wolfram Engine container invoked by Airflow;
-- an on-demand licensed engine where network and cost are acceptable;
-- a commercially licensed standalone application;
-- no Wolfram runtime in production, with validated methods promoted to Python.
-
-The decision record must include licensing confirmation, activation mode,
-runtime footprint, cold/warm timings, concurrency, recovery behavior, upgrade
-policy, and an exit/migration path.
-
-## Branch acceptance criteria
-
-This branch is ready to merge when:
-
-- current-version claims cite official Wolfram sources;
-- new features are mapped to concrete Babelapha inputs and outputs;
-- experimental AI/MCP work is separated from deterministic analysis;
-- the existing pilot and architecture documents reference this roadmap;
-- local Markdown links and Mermaid fences validate;
-- repository tests still pass.
+```mermaid
+flowchart LR
+    R[Local research evidence] --> Q{Production value proven?}
+    Q -- No --> L[Keep local Mathematica lab]
+    Q -- Yes --> O[Design optional isolated runtime]
+    O --> C[License security provenance review]
+    C --> D[Separate analysis DAG]
+```

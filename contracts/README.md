@@ -64,3 +64,41 @@ The contract regression tests freeze both the commit-pinned emitted URLs and
 the exact checked-in schema bytes. Changing a contract therefore requires a
 new schema version and immutable contract commit; editing a v1 file in place
 fails validation.
+
+## Local Mathematica analysis contracts
+
+The Wolfram-first local prototype has a separate, filesystem-scoped contract
+set. It does not depend on Airflow, MinIO, or the provenance read API:
+
+- `mathematica-local-source-evidence-v1.schema.json` identifies the one local
+  source video and the ordered source-discovery/hash-verification events;
+- `mathematica-local-analysis-input-v1.schema.json` binds that evidence and
+  source identity to `mathematica-local-media-lab-v1`, its parameters, and the
+  relative `output/` directory; it also binds the independently calculated
+  Wolfram package SHA-256 into the deterministic run identity;
+- `mathematica-local-analysis-result-v1.schema.json` defines the portable
+  Wolfram processor identity, video/audio measurements, summarized
+  `TimeSeries`/`EventSeries`/`Tabular` structures, capabilities, provenance
+  summary, and output identities.
+
+`prototype/mathematica/local_boundary.py` writes canonical source evidence and
+analysis input before Wolfram runs. After Mathematica writes
+`output/result.raw.json`, the same boundary rejects unknown fields, duplicate
+keys, nonfinite values, unsafe paths, identity mismatches, and missing or
+altered outputs. It recomputes the SHA-256 and byte size for the exact seven
+declared Wolfram artifacts:
+
+```text
+analysis-notebook.nb
+audio-overview.png
+audio-overview.svg
+report.html
+report.md
+video-contact-sheet.png
+video-summary.png
+```
+
+Only then does it write `output/result.json` using
+`SORTED_INDENTED_JSON_V1`. Python is the contract and integrity boundary; all
+media measurements and the seven analytical artifacts are produced by the
+local Wolfram package.

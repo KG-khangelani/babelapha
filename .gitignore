@@ -153,6 +153,19 @@ reports/
 pipelines/airflow/dags/.babelapha-code-identity.json
 pipelines/airflow/dags/.babelapha-git-sha
 
+# Local Mathematica prototype inputs and generated runtime material
+/Local-prototype/ingest/**
+/Local-prototype/artefacts/**
+/Local-prototype/output/**
+/Local-prototype/logs/**
+/Local-prototype/work/**
+!/Local-prototype/logs/
+!/Local-prototype/ingest/.gitkeep
+!/Local-prototype/artefacts/.gitkeep
+!/Local-prototype/output/.gitkeep
+!/Local-prototype/logs/.gitkeep
+!/Local-prototype/work/.gitkeep
+
 # Ignore secrets and credentials backups
 secrets/
 *.secret

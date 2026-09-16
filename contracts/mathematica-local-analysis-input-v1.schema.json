@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/mathematica-local-analysis-input-v1.schema.json",
+  "title": "Babelapha Mathematica local analysis input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analysis_id",
+    "object_id",
+    "run_id",
+    "package_sha256",
+    "source",
+    "evidence",
+    "output_directory",
+    "parameters"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "analysis_id": {"const": "mathematica-local-media-lab-v1"},
+    "object_id": {
+      "type": "string",
+      "pattern": "^local-[a-z0-9][a-z0-9-]{0,80}-[a-f0-9]{12}$"
+    },
+    "run_id": {"type": "string", "pattern": "^local-[a-f0-9]{16}$"},
+    "package_sha256": {"$ref": "#/$defs/sha256"},
+    "source": {"$ref": "#/$defs/source"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"const": "artefacts/source-evidence.json"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "output_directory": {"const": "output"},
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "silence_threshold_db",
+        "frame_seconds",
+        "hop_seconds",
+        "random_seed"
+      ],
+      "properties": {
+        "silence_threshold_db": {
+          "type": "number",
+          "minimum": -120.0,
+          "maximum": 0.0
+        },
+        "frame_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 10.0
+        },
+        "hop_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 10.0
+        },
+        "random_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^ingest/[^/\\\\]+$"
+        },
+        "filename": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {
+          "type": "string",
+          "pattern": "^video/[A-Za-z0-9.+-]+$"
+        }
+      }
+    }
+  }
+}

@@ -1,153 +1,134 @@
-# Target architecture
+# Local Wolfram-first architecture
 
-## Boundary
+## Implemented system boundary
 
-Wolfram is a consumer of verified Babelapha artifacts and a producer of new
-derived artifacts. It is not the ingestion orchestrator, media store, lineage
-authority, or transcoder.
+The current system is a self-contained local research workflow. Mathematica is
+the media and analytical engine; Python is the narrow trust boundary around
+its inputs and outputs. Airflow and MinIO are not involved in this path.
 
 ```mermaid
 flowchart LR
-    Source[Source media in MinIO] --> Ingest[Existing ingestion DAG]
-    Ingest --> Renditions[HLS and DASH artifacts]
-    Ingest --> Evidence[Immutable manifests and OpenLineage]
-    Evidence --> Gate[verify_provenance]
-    Gate --> Bundle[Verified evidence bundle API]
+    subgraph Workspace[Local-prototype]
+        I[ingest: one video]
+        E[artefacts: evidence input runtime]
+        O[output: results reports notebook]
+        L[logs]
+        X[work: reserved scratch space]
+    end
 
-    Source --> Notebook[Mathematica notebook]
-    Bundle --> Notebook
-    Notebook --> Package[Versioned Wolfram package]
-
-    Source --> Analysis[Optional Wolfram analysis DAG]
-    Bundle --> Analysis
-    Package --> Analysis
-    Analysis --> Results[Canonical JSON and PNG or SVG]
-    Results --> AnalysisStore[Immutable analysis prefix in MinIO]
-    AnalysisStore --> AnalysisEvidence[Analysis manifests and OpenLineage]
+    I --> PB[Python prepare boundary]
+    PB --> E
+    E --> PS[PowerShell launcher]
+    PS --> WT[Wolfram tests]
+    WT --> WL[Version 15 SPF package]
+    I --> WL
+    WL --> O
+    O --> VB[Python validation boundary]
+    VB --> O
+    PS --> L
 ```
 
-## Why a separate DAG
+The launcher is
+[`scripts/Invoke-MathematicaLocalPrototype.ps1`](../../scripts/Invoke-MathematicaLocalPrototype.ps1).
+It discovers registered installations, probes candidates through
+`wolframscript -local`, requires a working Wolfram Language 15-or-newer kernel,
+and records the exact selected runtime. The reference run used Engine 15.0.0;
+the architecture does not assume a particular patch version.
 
-The shipped ingestion DAGs have explicit task contracts and finish with a
-provenance gate. Adding Wolfram to `ingest_pipeline_local` would change the
-meaning of a successful ingestion and make it depend on a licensed engine.
+## Responsibility split
 
-The future `analyze_media_wolfram` DAG should therefore:
+| Component | Owns | Does not own |
+|---|---|---|
+| PowerShell launcher | Runtime discovery, exact kernel selection, ordering, logs, completion checks | Media calculations or result interpretation |
+| Python boundary | Byte identity, local evidence, strict JSON, safe paths, artifact rehashing, canonicalization | Audio/video measurements, plots, reports, or notebook calculations |
+| Wolfram package | Video/audio import, analysis, `TimeSeries`, `EventSeries`, `Tabular`, visualization, reports, notebook | Canonical JSON trust decision or remote publication |
 
-1. accept an object ID and a verified ingestion run ID;
-2. fetch and independently verify the corresponding evidence bundle with
-   Babelapha's existing standard-library Python verifier;
-3. resolve the source artifact by immutable URI/version and SHA-256;
-4. execute the versioned Wolfram package headlessly;
-5. validate the result contract;
-6. upload portable result artifacts to MinIO;
-7. record one immutable manifest and OpenLineage event per task attempt; and
-8. end with its own `verify_provenance` gate.
+This split ensures that every human-facing analytical artifact is genuinely
+produced by Mathematica while portable identity and contract enforcement do
+not depend on trusting Mathematica's serialization alone.
 
-The DAG is opt-in and may fail without changing the status of the ingestion
-run it analyzes.
-
-## Data flow and storage
-
-Proposed output namespace:
-
-```text
-analysis/wolfram/<object-id>/<analysis-id>/<analysis-run-id>/
-  result.json
-  audio-overview.png
-  audio-overview.svg
-```
-
-Proposed immutable provenance namespace follows the existing convention:
-
-```text
-provenance/<object-id>/<analysis-run-id>/<task-id>/<attempt>-<status>.json
-```
-
-`analysis-id` identifies the analysis contract and method version, while
-`analysis-run-id` identifies one Airflow execution. Mutable convenience reports
-must not become the source of truth.
-
-## Processor evidence interface
-
-This branch adds a strict JSON task-payload interface for processor identity:
-
-```json
-{
-  "provenance_parameters": {
-    "analysis_id": "audio-provenance-diagnostic-v1",
-    "processor": {
-      "name": "wolfram",
-      "kernel_version": "15.0.1",
-      "system_id": "Linux-x86-64",
-      "package_sha256": "<sha256>",
-      "network_mode": "offline",
-      "evaluator_backend": "<declared backend>"
-    },
-    "resources": []
-  }
-}
-```
-
-These values are copied into the immutable manifest's
-`execution.parameters` and its OpenLineage execution facet. They must be
-strict JSON values. Babelapha rejects attempts to override object, source
-commit, DAG-bundle, Git-identity, or pipeline-task-contract facts.
-The eventual task adapter must allowlist its fields and must not place license
-credentials, tokens, or other secrets in provenance parameters.
-
-## Trust and dependency boundaries
+## Analysis graph
 
 ```mermaid
 flowchart TB
-    subgraph Canonical[Canonical Babelapha boundary]
-        MinIO[Versioned MinIO objects]
-        API[Read-only evidence API]
-        Manifests[Immutable manifests]
-        OL[OpenLineage events]
-    end
-
-    subgraph Wolfram[Optional licensed boundary]
-        WS[wolframscript]
-        WL[Versioned Wolfram package]
-        Models[Declared paclets and models]
-    end
-
-    Secrets[License material] --> WS
-    MinIO --> WS
-    API --> WS
-    WL --> WS
-    Models --> WS
-    WS --> MinIO
-    WS --> Manifests
-    WS --> OL
+    V[Wolfram Video] --> F[Uniform frame sampling]
+    F --> B[Brightness color motion]
+    F --> CS[Contact sheet]
+    V --> VS[VideoSummaryPlot]
+    V --> A[Wolfram Audio]
+    A --> AM[AudioMeasurements]
+    A --> AL[AudioLocalMeasurements]
+    A --> AI[AudioIntervals]
+    AL --> TS[Named TimeSeries]
+    E[Verified local events] --> ES[EventSeries]
+    E --> TB[Tabular]
+    B --> J[Portable measurement summary]
+    AM --> J
+    AI --> J
+    TS --> J
+    ES --> J
+    TB --> J
+    J --> R[Reports plots and notebook]
 ```
 
-- License material is a runtime secret. It must never be embedded in an image,
-  committed, logged, stored in a result, or returned by the evidence API.
-- Network access is denied by default for a reproducibility run. Any cloud or
-  external-service experiment is a separate processor with explicit approval
-  and evidence.
-- The official Wolfram image must be pinned by digest for a provenance-bearing
-  run. A floating `latest` tag is unsuitable evidence.
-- A notebook may call the package, but production results come from the
-  headless entry point and the validated JSON contract.
-- Version 15 `Tabular`, `TimeSeries`, and `EventSeries` objects are internal
-  analysis representations. They never replace the evidence bundle or become
-  required to inspect a published result.
-- A future Wolfram MCP server is a read-only client of the same versioned
-  analysis functions. It cannot bypass the evidence API or obtain write access
-  to Airflow or MinIO.
+The internal Wolfram objects are not interchange formats. Their stable
+measurements and structural summaries cross the boundary as JSON, while the
+notebook preserves a native Mathematica review experience.
 
-## Failure behavior
+## Local storage contract
 
-| Failure | Required behavior |
-|---|---|
-| Existing Python verifier rejects the evidence bundle | Fail before Wolfram execution and record no successful outputs |
-| Source hash or storage version differs | Fail as an integrity conflict |
-| License unavailable or expired | Fail the optional DAG with a specific reason code; ingestion remains successful |
-| Required paclet/model unavailable | Fail closed and identify the missing dependency |
-| Undeclared network access required | Fail the reproducibility run |
-| Invalid JSON result | Do not publish derived artifacts as successful |
-| Partial upload | Record only verified uploaded artifacts; retry idempotently under the same analysis run |
-| Provenance emission incomplete | Final analysis gate fails even if computation succeeded |
+```text
+Local-prototype/
+  ingest/<one-video>
+  artefacts/source-evidence.json
+  artefacts/analysis-input.json
+  artefacts/runtime.json
+  output/result.raw.json
+  output/result.json
+  output/audio-overview.png
+  output/audio-overview.svg
+  output/video-contact-sheet.png
+  output/video-summary.png
+  output/report.md
+  output/report.html
+  output/analysis-notebook.nb
+  logs/mathematica-local-<UTC timestamp>.log
+  work/
+```
+
+Inputs and generated material stay local and are ignored by Git. Paths inside
+the JSON contracts are safe relative paths; absolute local machine paths are
+limited to the runtime record and launcher output.
+
+## Trust and failure boundaries
+
+The prepare boundary hashes the user-selected source and creates a canonical
+local evidence document. It also computes the complete Wolfram package hash
+and binds it into both the analysis input and deterministic run ID. Mathematica
+independently recomputes that package identity and verifies source byte size,
+source SHA-256, evidence SHA-256, and evidence/source identity before opening
+the video. The validation boundary permits no undeclared result fields or
+outputs, recomputes the current package hash, and recomputes every declared
+output identity. Preparing a new valid run removes prior canonical/raw result
+markers so a failed rerun cannot look successful.
+
+The package uses Structured Package Format and typed exceptions so callers can
+distinguish usage, invalid input, integrity, dependency, and analysis/export
+failures. Credentials and license material are never written to evidence,
+results, reports, or logs.
+
+## Deferred production topology
+
+An optional Airflow/MinIO analysis path is intentionally deferred. It is not a
+hidden requirement of the local runner and is not represented as implemented.
+If adopted later, it must remain a separately triggered analysis workflow,
+reuse the versioned result contract, run Wolfram in an isolated licensed
+runtime, record immutable processor/artifact identities, and leave ingestion
+success independent of Wolfram availability.
+
+```mermaid
+flowchart LR
+    L[Verified local value] -. future decision .-> D[Optional analysis DAG]
+    D -. future .-> M[Immutable MinIO artifacts]
+    M -. future .-> P[Manifest and OpenLineage evidence]
+```

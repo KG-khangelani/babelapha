@@ -1,85 +1,76 @@
-# Mathematica and Wolfram Language in Babelapha
+# Local Mathematica media lab
 
-## Decision
+## Status
 
-Adopt Mathematica as an **optional research and analysis environment**, not as
-a replacement for Babelapha's Python, FFmpeg, Airflow, MinIO, or provenance
-stack. Promote a Wolfram analysis into automation only after a bounded pilot
-shows a material advantage over the equivalent Python implementation.
+The Wolfram-first local prototype is implemented and has completed an
+end-to-end video run. The package requires Wolfram Language 15 or newer. The
+verified runtime for this checkout is **Wolfram Engine 15.0.0 for Windows
+x86-64**; every run records the exact kernel path and version rather than
+assuming a patch release.
 
-The first pilot should use the same versioned Wolfram package from an
-interactive notebook and from `wolframscript`. It should analyze an existing
-source video together with its verified evidence bundle and produce portable
-JSON and PNG/SVG artifacts. The production path remains gated on commercial
-licensing.
+The primary entry point is:
 
-The current feature baseline is Wolfram Language/Mathematica **15.0.1**. The
-prototype should deliberately leverage Version 15's typed time/event series,
-tabular and categorical data, model reports, Structured Package Format, and
-exception handling. MCP, AI Assistant, semantic/LLM workflows, and standalone
-applications are later, separately gated experiments rather than implicit
-parts of the first pipeline stage.
+```powershell
+.\scripts\Invoke-MathematicaLocalPrototype.ps1
+```
 
-## Why this boundary
+Place exactly one video in `Local-prototype/ingest/`. The launcher discovers a
+working local kernel, runs the Wolfram tests and analysis, validates the result,
+and keeps all runtime material under `Local-prototype/`.
 
-Wolfram Language puts signal processing, statistics, symbolic computation,
-machine learning, text processing, graph analysis, media objects, and polished
-visualization into one coherent expression system. That makes it particularly
-attractive for exploratory work where an analyst moves between several of
-those domains.
+## Local boundary
 
-Babelapha already has stronger operational foundations for ingestion:
+Mathematica owns the analysis:
 
-- FFmpeg creates HLS and DASH renditions.
-- Airflow owns scheduling, retries, and task state.
-- MinIO stores versioned inputs, outputs, and immutable evidence.
-- the provenance manifests and OpenLineage events identify artifacts and
-  execution facts;
-- each shipped DAG has a fixed task contract ending in `verify_provenance`.
+- direct `Video` import and audio-track extraction;
+- sampled-frame brightness, color, and motion analysis;
+- RMS amplitude, peak amplitude, EBU loudness, spectral centroid, and
+  audible/silent interval analysis;
+- named-component `TimeSeries`, provenance `EventSeries`, and `Tabular` data;
+- plots, reports, and a reproducible Mathematica notebook.
 
-Putting a licensed Wolfram runtime into the required ingestion path would add
-activation and availability failure modes without improving transcoding. A
-separate, optional analysis DAG preserves the existing trust boundary.
+Python is deliberately limited to the trust boundary. It hashes the source,
+writes strict local evidence and analysis input, rejects ambiguous JSON and
+unsafe paths, independently rehashes every result artifact, and canonicalizes
+`result.raw.json` as `result.json`. It does not calculate the media results or
+produce the human-facing analysis.
 
-## Recommended use by workload
+The Version 15 package uses Structured Package Format through
+`PackageInitialize` and registered typed exceptions. Expected failures map to
+stable reason codes and process exit codes.
 
-| Workload | Recommendation | Reason |
-|---|---|---|
-| Interactive cross-domain investigation | Pilot | Wolfram's strongest fit: symbolic data, media, graphs, models, and visualizations in one notebook |
-| Provenance graph exploration | Pilot | First-class graph algorithms and visualization are useful, but must beat NetworkX/Python in authoring value |
-| Audio and speech diagnostics | Pilot | Integrated signal-processing workflow; compare directly with FFmpeg/librosa/SciPy |
-| Transcript exploration | Pilot after transcripts exist | Strong text and semantic tools, but model/service dependencies must be made explicit |
-| Repeatable derived-artifact stage | Conditional | Viable through `wolframscript` if results are portable, reproducible, licensed, and fully evidenced |
-| HLS/DASH transcoding | Do not adopt | FFmpeg remains the correct specialized engine |
-| Core orchestration | Do not adopt | Airflow remains the execution authority |
-| Canonical provenance storage | Do not adopt | Existing manifests, evidence bundles, MinIO, and OpenLineage remain authoritative |
+## Portable outputs
 
-## Package map
+Each successful Wolfram run declares and hashes exactly seven analytical
+artifacts:
 
+1. `audio-overview.png`
+2. `audio-overview.svg`
+3. `video-contact-sheet.png`
+4. `video-summary.png`
+5. `report.md`
+6. `report.html`
+7. `analysis-notebook.nb`
+
+The output directory also contains Wolfram's `result.raw.json` and Python's
+strictly validated canonical `result.json`.
+
+## Documentation map
+
+- [Local workspace and command](../../Local-prototype/README.md)
+- [Implemented pilot](pilot-design.md)
+- [Local architecture](architecture.md)
+- [Mathematica leverage roadmap](leverage-roadmap.md)
 - [Capability assessment](capability-assessment.md)
 - [Current and recent features](new-features.md)
-- [Comparison with the Python stack](python-comparison.md)
-- [Target architecture](architecture.md)
-- [Pilot design](pilot-design.md)
-- [Phased leverage roadmap](leverage-roadmap.md)
+- [Comparison framework](python-comparison.md)
 - [Licensing and operations](licensing-and-operations.md)
 - [Annotated sources](sources.md)
 
-## Adoption rule
+## Deferred production path
 
-Move from research-only use to an optional production analysis DAG only when
-all of these conditions hold:
-
-1. Wolfram provides a capability or authoring advantage that matters to an
-   identified Babelapha user.
-2. Notebook and headless runs produce equivalent canonical JSON within stated
-   numeric tolerances.
-3. Every input, output, code bundle, runtime, model, parameter, and external
-   dependency is identifiable in provenance.
-4. The output is usable without Mathematica.
-5. Resource use is acceptable against the Python baseline.
-6. The intended deployment has an approved production license and a workable
-   non-interactive activation method.
-
-If any of these conditions fails, keep Mathematica as a local research tool or
-reimplement the promoted method in Python.
+Airflow, MinIO publication, containerized Wolfram execution, OpenLineage
+emission, MCP, cloud services, LLMs, and speech services are not part of this
+implemented prototype. They remain possible later phases only after the local
+Mathematica work establishes a concrete analytical advantage and its licensing
+and operational model is approved.

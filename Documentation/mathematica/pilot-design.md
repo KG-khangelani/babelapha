@@ -1,206 +1,149 @@
-# Pilot design
+# Implemented local Mathematica pilot
 
-## Objective
+## Objective and verified baseline
 
-Determine whether Wolfram Language provides enough analytical and authoring
-value to justify an optional Babelapha compute stage while preserving portable
-outputs, reproducibility, and artifact-level provenance.
+The pilot is now a runnable, local-only media laboratory rather than a design
+for a future Airflow task. It exercises Wolfram Language directly over one
+local video while retaining portable, independently verified outputs.
 
-The pilot is a design for later execution. This documentation change does not
-install or activate Wolfram products.
+The package requires Wolfram Language 15 or newer. The completed reference run
+used **Wolfram Engine 15.0.0 for Microsoft Windows (64-bit)** on
+`Windows-x86-64`. The launcher records the exact runtime in
+`Local-prototype/artefacts/runtime.json` for every run.
 
-The implementation baseline is Wolfram Language 15.0 or newer, with the exact
-patch version recorded. It uses Version 15 Structured Package Format and typed
-exception handling. Notebook/headless equivalence must use the same patch
-version; results from 15.0.0 and 15.0.1 are separate runtime identities.
+## Run it
 
-## Workload
+```powershell
+New-Item -ItemType Directory -Force .\Local-prototype\ingest | Out-Null
+Copy-Item C:\path\to\video.mp4 .\Local-prototype\ingest\
+.\scripts\Invoke-MathematicaLocalPrototype.ps1
+```
 
-Run an **audio and provenance diagnostic** over one short, legally usable test
-video already accepted by the local ingestion pipeline.
+The ingest directory must contain exactly one supported video. Use
+`-PreflightOnly` to inspect the selected kernel without changing the workspace,
+or pass `-WolframKernelPath` to select an installed kernel explicitly.
 
-The shared analysis package will:
+```text
+Local-prototype/
+  ingest/       one user-supplied video
+  artefacts/    source evidence, analysis input, and runtime identity
+  output/       raw/canonical JSON, plots, reports, and notebook
+  logs/         combined launcher, Python, and Wolfram logs
+  work/         reserved scratch space for later local experiments
+```
 
-1. consume a bundle that Babelapha's existing Python verifier has accepted;
-2. confirm that the selected source identity matches the verified input
-   manifest;
-3. inspect media duration, sample rate, and channel count;
-4. calculate loudness summary statistics and detected audio/silence intervals;
-5. calculate a deterministic spectrogram-derived summary;
-6. render an audio overview plot;
-7. represent verifier-approved stage attempts as a typed `EventSeries` and
-   measurements as named-component `TimeSeries` values;
-8. summarize the ingestion stage/artifact graph without changing its meaning;
-9. emit `result.raw.json`, PNG/SVG diagnostics, and an optional noncanonical
-   Markdown review artifact for Python validation and publication.
+All five runtime directories are ignored by Git. The workspace guide is
+[Local-prototype/README.md](../../Local-prototype/README.md).
 
-Speech recognition, LLM calls, pretrained neural networks, and cloud functions
-are excluded from the first pilot. They can be evaluated later as separately
-identified processors.
+## Execution flow
 
-## Shared implementation shape
+```mermaid
+flowchart LR
+    V[One local video] --> P[Python prepare boundary]
+    P --> E[Source evidence and analysis input]
+    E --> T[Wolfram package tests]
+    T --> W[Wolfram media analysis]
+    W --> R[result.raw.json]
+    W --> A[Seven analysis artifacts]
+    R --> G[Python result gate]
+    A --> G
+    G --> C[Canonical result.json]
+```
+
+The PowerShell launcher always invokes `wolframscript -local` with the exact
+discovered kernel path. It does not change global WolframScript configuration
+and does not start Docker, Airflow, MinIO, Pachyderm, or a cloud service.
+
+## Implementation shape
 
 ```text
 prototype/mathematica/
-  Kernel/init.wl
-  Kernel/InputValidation.wl
-  Kernel/EvidenceAdapter.wl
-  Kernel/MediaAnalysis.wl
-  Kernel/ResultExport.wl
-  Kernel/ErrorMapping.wl
+  BabelaphaAnalysis/Kernel/
+    init.wl
+    ErrorMapping.wl
+    InputValidation.wl
+    EvidenceAdapter.wl
+    MediaAnalysis.wl
+    ResultExport.wl
+    PublicAPI.wl
   analyze.wls
-  notebooks/audio-provenance-pilot.nb
-  tests/BabelaphaAnalysisTests.wlt
-  fixtures/
+  local_boundary.py
+  tests/
+    BabelaphaAnalysisTests.wlt
+    run-tests.wls
 ```
 
-- `Kernel/init.wl` loads a Version 15 Structured Package Format package through
-  `PackageInitialize`; the other files separate validation, adaptation,
-  calculation, export, and stable error mapping.
-- The notebook imports the package and presents intermediate exploration.
-- `analyze.wls` is a thin command-line adapter that reads an input manifest,
-  calls the package, and writes outputs.
-- Tests call package functions directly. The notebook contains no unique
-  production calculation.
-- Expected validation and dependency failures use registered exception types
-  and are converted to stable CLI exit/reason codes. Unexpected exceptions
-  terminate the task and retain diagnostic context in logs, not result JSON.
+- `init.wl` initializes the Version 15 Structured Package Format package with
+  `PackageInitialize`.
+- Registered exception types distinguish invalid input, integrity,
+  dependencies, analysis runtime, and export failures.
+- `analyze.wls` is a thin CLI over the exported package function. The generated
+  notebook calls that same package and contains no private calculation path.
+- `local_boundary.py` is dependency-free Python and owns only source identity,
+  strict contracts, safe paths, output rehashing, and canonical JSON.
 
-This layout is illustrative until the pilot is authorized; it is not created
-as part of the architecture-report phase.
+## Mathematica workload
 
-## Input interface
+The package opens the source directly as a Wolfram `Video`, samples twelve
+uniform frames, and constructs a named `TimeSeries` for brightness and
+mean-absolute grayscale frame difference. It calculates frame dimensions,
+brightness statistics, mean RGB, and motion summaries, then exports a contact
+sheet and `VideoSummaryPlot` result.
 
-The headless entry point accepts one path to a UTF-8 JSON document:
+For videos with a decodable audio track, Wolfram extracts `Audio[video]` and
+uses `AudioMeasurements`, `AudioLocalMeasurements`, `AudioIntervals`,
+`AudioPlot`, and `Spectrogram`. Results include sample rate, channel count,
+duration, RMS/peak amplitude, EBU loudness, audible and silent intervals, and
+spectral-centroid statistics. Local RMS and centroid observations are combined
+into a named-component `TimeSeries`.
 
-```json
-{
-  "schema_version": "1.0.0",
-  "analysis_id": "audio-provenance-diagnostic-v1",
-  "object_id": "sample-001",
-  "ingestion_run_id": "manual__example",
-  "evidence_bundle_uri": "http://provenance-api:8010/api/v1/media/sample-001/evidence-bundle?run_id=manual__example",
-  "evidence_verification": {
-    "verification": "VERIFIED",
-    "verifier": "pipelines/airflow/verify_evidence_bundle.py",
-    "verifier_sha256": "<64 lowercase hexadecimal characters>",
-    "evidence_set_sha256": "<64 lowercase hexadecimal characters>"
-  },
-  "source": {
-    "uri": "s3://pachyderm/incoming/sample-001/sample.mp4",
-    "sha256": "<64 lowercase hexadecimal characters>",
-    "s3_version_id": "<version identifier>"
-  },
-  "parameters": {
-    "random_seed": 20260916,
-    "spectrogram_window_seconds": 0.04,
-    "silence_threshold_db": -40.0
-  },
-  "output_directory": "/work/output"
-}
-```
+The verified source events become an `EventSeries` and a `Tabular` object.
+These rich Wolfram values remain internal; portable JSON contains their stable
+summaries.
 
-The adapter rejects unknown top-level fields, a missing source digest or
-storage version, a missing `VERIFIED` result from
-`verify_evidence_bundle.py`, a mismatched verifier or evidence-set hash, a
-mismatch between that verified bundle and the selected source, and an
-unsupported analysis or schema version. Airflow captures the verifier's JSON
-result in a separate pre-analysis task so evidence verification does not depend
-on Wolfram availability.
+## Contracts and artifacts
 
-## Result interface
+The Python preparation step writes canonical
+`artefacts/source-evidence.json` and `artefacts/analysis-input.json`. Their
+versioned schemas define source SHA-256 and byte size, local object/run
+identity, the exact Wolfram package SHA-256, fixed analysis parameters,
+evidence identity, and the relative output directory. The run ID changes when
+the source, parameters, analysis, or package changes. Mathematica independently
+recomputes the package hash and rechecks source/evidence hashes before analysis.
 
-The Wolfram adapter emits `result.raw.json`. A Python boundary validates its
-schema, rejects noncanonical or ambiguous values, and writes the canonical
-`result.json` analysis output. Its initial contract contains:
+Wolfram produces `result.raw.json` plus these seven declared outputs:
 
-```json
-{
-  "schema_version": "1.0.0",
-  "analysis_id": "audio-provenance-diagnostic-v1",
-  "object_id": "sample-001",
-  "ingestion_run_id": "manual__example",
-  "processor": {
-    "wolfram_version": "<exact kernel version>",
-    "system_id": "<Wolfram system identifier>",
-    "package_sha256": "<sha256>",
-    "random_seed": 20260916
-  },
-  "source": {
-    "uri": "s3://pachyderm/incoming/sample-001/sample.mp4",
-    "sha256": "<sha256>",
-    "s3_version_id": "<version identifier>"
-  },
-  "measurements": {
-    "duration_seconds": 0.0,
-    "sample_rate_hz": 0,
-    "channel_count": 0,
-    "loudness": {},
-    "audio_intervals": [],
-    "silence_intervals": [],
-    "spectrogram_summary": {}
-  },
-  "provenance_summary": {
-    "evidence_set_sha256": "<sha256>",
-    "task_count": 0,
-    "artifact_count": 0,
-    "integrity_conflict_count": 0
-  },
-  "outputs": [
-    {"path": "audio-overview.png", "media_type": "image/png", "sha256": "<sha256>"},
-    {"path": "audio-overview.svg", "media_type": "image/svg+xml", "sha256": "<sha256>"}
-  ]
-}
-```
+| Artifact | Purpose |
+|---|---|
+| `audio-overview.png` | Waveform, RMS, spectral-centroid, and spectrogram review |
+| `audio-overview.svg` | Portable vector RMS and spectral-centroid view |
+| `video-contact-sheet.png` | Uniformly sampled source frames |
+| `video-summary.png` | Wolfram `VideoSummaryPlot` output |
+| `report.md` | Portable text report with measurements and capabilities |
+| `report.html` | Self-contained local review page referencing the plots |
+| `analysis-notebook.nb` | Mathematica review notebook and shared-package rerun cell |
 
-All numeric units are encoded in field names or documented contract metadata;
-Wolfram-specific expressions are not exposed in JSON. JSON serialization uses
-sorted keys and a single documented number-format policy before hashing.
+Python then validates exact keys and types, rejects duplicate/nonfinite JSON,
+ensures every output is a direct child of `output/`, checks the exact seven-file
+set and media types, recomputes every size and SHA-256, and writes canonical
+`result.json` with `SORTED_INDENTED_JSON_V1`.
 
-## Python baseline
+## Failure and acceptance behavior
 
-Build an equivalent reference implementation using FFmpeg/ffprobe, Python,
-NumPy/SciPy, librosa where needed, NetworkX, and Matplotlib. It receives the
-same input manifest and emits the same measurement definitions.
+| Condition | Behavior |
+|---|---|
+| Missing, multiple, or unsupported ingest files | Launcher/boundary fails before Wolfram analysis |
+| Invalid input or unsafe relative path | Typed input failure, exit code 10 |
+| Source/evidence identity mismatch | Typed integrity failure, exit code 11 |
+| Required Wolfram capability unavailable | Typed dependency failure, exit code 12 |
+| Media analysis or export failure | Typed runtime/export failure, exit code 20 |
+| Invalid raw result or output hash | Python rejects it and does not write canonical `result.json` |
 
-The comparison records:
-
-- implementation time to the first reviewable result;
-- source lines excluding fixtures and generated material;
-- cold and warm wall-clock time;
-- peak resident memory;
-- repeat-run canonical JSON hashes;
-- numeric differences for agreed measurements;
-- notebook-to-headless equivalence;
-- dependency, activation, and recovery steps;
-- reviewer assessment of clarity and analytical expressiveness.
-
-## Acceptance tests
-
-1. **Input integrity:** altered source bytes, storage version, or evidence-set
-   hash cause a failure before analysis.
-2. **Repeatability:** three headless runs with identical inputs produce the
-   same canonical JSON hash; image hashes may vary only if the reason is
-   documented and the underlying plotted data hash is stable.
-3. **Notebook/headless parity:** canonical measurements produced through the
-   notebook and CLI match exactly for integers/strings and within `1e-9`
-   relative or absolute tolerance for floating-point fields.
-4. **Cross-stack parity:** Wolfram and Python measurements agree within the
-   field-specific tolerance documented before the benchmark. Differences in
-   algorithm semantics are named rather than hidden by a broad tolerance.
-5. **Portability:** results can be inspected and verified using only JSON,
-   standard image viewers, and Babelapha's Python verifier.
-6. **Isolation:** unavailable Wolfram licensing fails only the optional pilot
-   DAG and does not affect ingestion artifacts or status.
-7. **Provenance:** every successful task attempt records input/output hashes,
-   code and image identity, parameters, runtime version, and dependency facts;
-   the final analysis provenance gate passes.
-8. **Network control:** the declared local run succeeds with outbound network
-   access disabled after required resources and license arrangements are in
-   place.
-
-## Adoption decision
-
-Use the weighted scorecard in [python-comparison.md](python-comparison.md).
-Regardless of score, the pilot is a no-go for production if portable outputs,
-provenance completeness, commercial licensing, or unattended activation fails.
+The implemented end-to-end run passed Wolfram package tests, direct video and
+audio analysis, seven-artifact export, independent Python canonicalization,
+and a two-run byte-for-byte repeatability gate. A separate local no-audio run
+also passed with explicit `UNAVAILABLE` capability evidence, null audio
+measurements, portable placeholder plots, and a valid custom-workspace
+notebook.
+Further local experiments should preserve these contracts or introduce a new
+versioned `analysis_id` and schemas.
