@@ -1,0 +1,711 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/mathematica-local-analysis-result-v2.schema.json",
+  "title": "Babelapha Mathematica local analysis result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analysis_id",
+    "object_id",
+    "run_id",
+    "processor",
+    "source",
+    "transcript",
+    "evidence",
+    "parameters",
+    "capabilities",
+    "measurements",
+    "provenance_summary",
+    "outputs"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0.0"},
+    "analysis_id": {"const": "mathematica-local-media-lab-v2"},
+    "object_id": {"type": "string", "pattern": "^local-[a-z0-9][a-z0-9-]{0,80}-[a-f0-9]{12}$"},
+    "run_id": {"type": "string", "pattern": "^local-[a-f0-9]{16}$"},
+    "processor": {"$ref": "#/$defs/processor"},
+    "source": {"$ref": "#/$defs/source"},
+    "transcript": {"$ref": "#/$defs/transcriptConfig"},
+    "evidence": {"$ref": "#/$defs/evidenceReference"},
+    "parameters": {"$ref": "#/$defs/parameters"},
+    "capabilities": {"$ref": "#/$defs/capabilities"},
+    "measurements": {"$ref": "#/$defs/measurements"},
+    "provenance_summary": {"$ref": "#/$defs/provenanceSummary"},
+    "outputs": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/output"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "nullableNumber": {"type": ["number", "null"]},
+    "processor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "wolfram_version", "system_id", "package_sha256", "network_mode"],
+      "properties": {
+        "name": {"const": "BabelaphaAnalysis"},
+        "wolfram_version": {"type": "string", "pattern": "^(1[5-9]|[2-9][0-9]|[1-9][0-9]{2,})\\."},
+        "system_id": {"type": "string", "minLength": 1},
+        "package_sha256": {"$ref": "#/$defs/sha256"},
+        "network_mode": {"const": "disabled"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^ingest/[^/\\\\]+$"},
+        "filename": {"type": "string", "pattern": "^[^/\\\\]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"type": "string", "pattern": "^video/[A-Za-z0-9.+-]+$"}
+      }
+    },
+    "transcriptSidecar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type", "format"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^transcripts/[^/\\\\]+$"},
+        "filename": {"type": "string", "pattern": "^[^/\\\\]+\\.(txt|srt|vtt)$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"enum": ["text/plain", "application/x-subrip", "text/vtt"]},
+        "format": {"enum": ["txt", "srt", "vtt"]}
+      }
+    },
+    "transcriptConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "sidecar"],
+      "properties": {
+        "mode": {"enum": ["automatic", "prefer_sidecar", "sidecar", "disabled"]},
+        "sidecar": {"oneOf": [{"$ref": "#/$defs/transcriptSidecar"}, {"type": "null"}]}
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"const": "artefacts/source-evidence.json"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["silence_threshold_db", "frame_seconds", "hop_seconds", "random_seed"],
+      "properties": {
+        "silence_threshold_db": {"type": "number", "minimum": -120.0, "maximum": 0.0},
+        "frame_seconds": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 10.0},
+        "hop_seconds": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 10.0},
+        "random_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["USED", "UNAVAILABLE", "NOT_APPLICABLE"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "video_import",
+        "audio_track",
+        "video_summary_plot",
+        "frame_analysis",
+        "color_analysis",
+        "motion_analysis",
+        "sound_analysis",
+        "transcript_analysis",
+        "cross_modal_analysis",
+        "time_series",
+        "event_series",
+        "tabular",
+        "notebook_export"
+      ],
+      "properties": {
+        "video_import": {"$ref": "#/$defs/capability"},
+        "audio_track": {"$ref": "#/$defs/capability"},
+        "video_summary_plot": {"$ref": "#/$defs/capability"},
+        "frame_analysis": {"$ref": "#/$defs/capability"},
+        "color_analysis": {"$ref": "#/$defs/capability"},
+        "motion_analysis": {"$ref": "#/$defs/capability"},
+        "sound_analysis": {"$ref": "#/$defs/capability"},
+        "transcript_analysis": {"$ref": "#/$defs/capability"},
+        "cross_modal_analysis": {"$ref": "#/$defs/capability"},
+        "time_series": {"$ref": "#/$defs/capability"},
+        "event_series": {"$ref": "#/$defs/capability"},
+        "tabular": {"$ref": "#/$defs/capability"},
+        "notebook_export": {"$ref": "#/$defs/capability"}
+      }
+    },
+    "intervals": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {"type": "number", "minimum": 0.0},
+          {"type": "number", "minimum": 0.0}
+        ],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "nullableSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "mean", "maximum"],
+      "properties": {
+        "minimum": {"type": ["number", "null"], "minimum": 0.0},
+        "mean": {"type": ["number", "null"], "minimum": 0.0},
+        "maximum": {"type": ["number", "null"], "minimum": 0.0}
+      }
+    },
+    "rgb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["red", "green", "blue"],
+      "properties": {
+        "red": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "green": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "blue": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "unitSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "mean", "maximum"],
+      "properties": {
+        "minimum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "mean": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "maximum": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "minimum", "q05", "q25", "median", "q75", "q95", "maximum", "mean", "standard_deviation"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "minimum": {"$ref": "#/$defs/nullableNumber"},
+        "q05": {"$ref": "#/$defs/nullableNumber"},
+        "q25": {"$ref": "#/$defs/nullableNumber"},
+        "median": {"$ref": "#/$defs/nullableNumber"},
+        "q75": {"$ref": "#/$defs/nullableNumber"},
+        "q95": {"$ref": "#/$defs/nullableNumber"},
+        "maximum": {"$ref": "#/$defs/nullableNumber"},
+        "mean": {"$ref": "#/$defs/nullableNumber"},
+        "standard_deviation": {"type": ["number", "null"], "minimum": 0.0}
+      }
+    },
+    "histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bin_edges", "counts", "fractions"],
+      "properties": {
+        "bin_edges": {"type": "array", "items": {"type": "number"}},
+        "counts": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "fractions": {"type": "array", "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}}
+      }
+    },
+    "videoMeasurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_seconds", "frame_count_sampled", "frame_dimensions", "brightness", "mean_rgb", "motion"],
+      "properties": {
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "frame_count_sampled": {"type": "integer", "minimum": 1},
+        "frame_dimensions": {
+          "type": "array",
+          "prefixItems": [{"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "brightness": {"$ref": "#/$defs/unitSummary"},
+        "mean_rgb": {"$ref": "#/$defs/rgb"},
+        "motion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "transition_count", "mean", "maximum"],
+          "properties": {
+            "method": {"const": "mean-absolute-grayscale-frame-difference"},
+            "transition_count": {"type": "integer", "minimum": 0},
+            "mean": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0},
+            "maximum": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0}
+          }
+        }
+      }
+    },
+    "videoFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_index", "time_seconds", "frame_difference", "color_histogram_distance", "brightness", "saturation", "contrast", "colorfulness", "mean_rgb", "mean_color_hex"],
+      "properties": {
+        "sample_index": {"type": "integer", "minimum": 1},
+        "time_seconds": {"type": "number", "minimum": 0.0},
+        "frame_difference": {"type": "number", "minimum": 0.0},
+        "color_histogram_distance": {"type": "number", "minimum": 0.0},
+        "brightness": {"type": "number", "minimum": 0.0},
+        "saturation": {"type": "number", "minimum": 0.0},
+        "contrast": {"type": "number", "minimum": 0.0},
+        "colorfulness": {"type": "number", "minimum": 0.0},
+        "mean_rgb": {"$ref": "#/$defs/rgb"},
+        "mean_color_hex": {"type": "string", "pattern": "^#[A-F0-9]{6}$"}
+      }
+    },
+    "paletteColor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rank", "hex", "rgb", "fraction"],
+      "properties": {
+        "rank": {"type": "integer", "minimum": 1, "maximum": 8},
+        "hex": {"type": "string", "pattern": "^#[A-F0-9]{6}$"},
+        "rgb": {"$ref": "#/$defs/rgb"},
+        "fraction": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "sceneCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_sample_index", "to_sample_index", "time_seconds", "score", "frame_difference", "color_histogram_distance"],
+      "properties": {
+        "from_sample_index": {"type": "integer", "minimum": 1},
+        "to_sample_index": {"type": "integer", "minimum": 2},
+        "time_seconds": {"type": "number", "minimum": 0.0},
+        "score": {"type": "number", "minimum": 0.0},
+        "frame_difference": {"type": "number", "minimum": 0.0},
+        "color_histogram_distance": {"type": "number", "minimum": 0.0}
+      }
+    },
+    "videoAnalytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_times_seconds", "per_frame", "color", "scene_changes"],
+      "properties": {
+        "sample_times_seconds": {"type": "array", "minItems": 1, "items": {"type": "number", "minimum": 0.0}},
+        "per_frame": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/videoFrame"}},
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "mean_rgb", "palette", "brightness", "saturation", "contrast", "colorfulness"],
+          "properties": {
+            "method": {"type": "string", "minLength": 1},
+            "mean_rgb": {"$ref": "#/$defs/rgb"},
+            "palette": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/paletteColor"}},
+            "brightness": {"$ref": "#/$defs/distribution"},
+            "saturation": {"$ref": "#/$defs/distribution"},
+            "contrast": {"$ref": "#/$defs/distribution"},
+            "colorfulness": {"$ref": "#/$defs/distribution"}
+          }
+        },
+        "scene_changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "threshold", "candidates"],
+          "properties": {
+            "method": {"type": "string", "minLength": 1},
+            "threshold": {"type": ["number", "null"], "minimum": 0.0},
+            "candidates": {"type": "array", "items": {"$ref": "#/$defs/sceneCandidate"}}
+          }
+        }
+      }
+    },
+    "featureAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observation_count", "reason"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "observation_count": {"type": "integer", "minimum": 0},
+        "reason": {"type": "string"}
+      }
+    },
+    "audioAnalytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "dynamics", "distribution", "frequency", "pitch", "availability"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {"type": "string"},
+        "method": {"type": "string", "minLength": 1},
+        "dynamics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rms_amplitude": {"$ref": "#/$defs/distribution"},
+            "peak_amplitude": {"$ref": "#/$defs/distribution"},
+            "rms_dbfs": {"$ref": "#/$defs/distribution"},
+            "local_loudness": {"$ref": "#/$defs/distribution"},
+            "crest_factor": {"type": ["number", "null"], "minimum": 0.0},
+            "crest_factor_db": {"$ref": "#/$defs/nullableNumber"},
+            "local_dynamic_range_db": {"type": ["number", "null"], "minimum": 0.0}
+          }
+        },
+        "distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rms_amplitude_histogram": {"$ref": "#/$defs/histogram"},
+            "rms_dbfs_histogram": {"$ref": "#/$defs/histogram"}
+          }
+        },
+        "frequency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spectral_centroid_hz": {"$ref": "#/$defs/distribution"},
+            "spectral_spread_hz": {"$ref": "#/$defs/distribution"},
+            "zero_crossing_rate": {"$ref": "#/$defs/distribution"},
+            "nyquist_frequency_hz": {"type": "number", "minimum": 0.0}
+          }
+        },
+        "pitch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "method", "observation_count", "window_count", "coverage_fraction", "fundamental_frequency_hz"],
+          "properties": {
+            "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+            "reason": {"type": "string"},
+            "method": {"type": "string", "minLength": 1},
+            "observation_count": {"type": "integer", "minimum": 0},
+            "window_count": {"type": "integer", "minimum": 0},
+            "coverage_fraction": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "fundamental_frequency_hz": {"$ref": "#/$defs/distribution"}
+          }
+        },
+        "availability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rms_amplitude", "peak_amplitude", "spectral_centroid", "spectral_spread", "zero_crossing_rate", "local_loudness", "fundamental_frequency"],
+          "properties": {
+            "rms_amplitude": {"$ref": "#/$defs/featureAvailability"},
+            "peak_amplitude": {"$ref": "#/$defs/featureAvailability"},
+            "spectral_centroid": {"$ref": "#/$defs/featureAvailability"},
+            "spectral_spread": {"$ref": "#/$defs/featureAvailability"},
+            "zero_crossing_rate": {"$ref": "#/$defs/featureAvailability"},
+            "local_loudness": {"$ref": "#/$defs/featureAvailability"},
+            "fundamental_frequency": {"$ref": "#/$defs/featureAvailability"}
+          }
+        }
+      }
+    },
+    "transcriptSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_seconds", "end_seconds", "text"],
+      "properties": {
+        "start_seconds": {"type": "number", "minimum": 0.0},
+        "end_seconds": {"type": "number", "minimum": 0.0},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "transcriptStatistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["character_count", "word_count", "sentence_count", "unique_word_count", "lexical_diversity", "words_per_minute", "top_terms"],
+      "properties": {
+        "character_count": {"type": "integer", "minimum": 0},
+        "word_count": {"type": "integer", "minimum": 0},
+        "sentence_count": {"type": "integer", "minimum": 0},
+        "unique_word_count": {"type": "integer", "minimum": 0},
+        "lexical_diversity": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0},
+        "words_per_minute": {"type": ["number", "null"], "minimum": 0.0},
+        "top_terms": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["term", "count"],
+            "properties": {
+              "term": {"type": "string", "minLength": 1},
+              "count": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    "whisperArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_element", "sha256", "size_bytes", "status", "actual_sha256", "actual_size_bytes"],
+      "properties": {
+        "content_element": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["VERIFIED", "NOT_CACHED", "HASH_MISMATCH"]},
+        "actual_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "actual_size_bytes": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "whisperModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "repository_resource_name", "resource_uuid", "resource_version", "size", "target_device", "network_mode", "artifacts", "identity_sha256"],
+      "properties": {
+        "status": {"enum": ["VERIFIED", "NOT_CACHED", "IDENTITY_MISMATCH"]},
+        "reason": {"type": "string"},
+        "repository_resource_name": {"const": "Whisper-V1 Nets"},
+        "resource_uuid": {"const": "5211d691-293f-417d-a19f-f1e5faef3fb7"},
+        "resource_version": {"const": "1.0.0"},
+        "size": {"const": "Tiny"},
+        "target_device": {"const": "CPU"},
+        "network_mode": {"const": "disabled"},
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "audio_encoder": {
+              "allOf": [
+                {"$ref": "#/$defs/whisperArtifact"},
+                {"properties": {"content_element": {"const": "EvaluationNet:tiny_encoder"}, "sha256": {"const": "0c42ff9e0c142bf5f8badf35d9ce337ea9b4d4edce761b31caaebe53c25a464c"}, "size_bytes": {"const": 32934064}}}
+              ]
+            },
+            "text_decoder": {
+              "allOf": [
+                {"$ref": "#/$defs/whisperArtifact"},
+                {"properties": {"content_element": {"const": "EvaluationNet:tiny_decoder"}, "sha256": {"const": "4d39de7df517ac91679b4daa9bd359dba0e85a1f9748699090c1c946a7ec4f9a"}, "size_bytes": {"const": 197918640}}}
+              ]
+            },
+            "labels": {
+              "allOf": [
+                {"$ref": "#/$defs/whisperArtifact"},
+                {"properties": {"content_element": {"const": "Labels"}, "sha256": {"const": "d3c09f659b7ef46cfaae621574a751fcac71656c6436e997f71129006ccc16ef"}, "size_bytes": {"const": 437955}}}
+              ]
+            }
+          }
+        },
+        "identity_sha256": {
+          "oneOf": [
+            {"const": "49329aeb256c668a81019ddd1ca12b4b04d781c0a855c63cacfbcc317f2d13b9"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "VERIFIED"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "reason": {"const": ""},
+              "artifacts": {"required": ["audio_encoder", "text_decoder", "labels"]},
+              "identity_sha256": {"const": "49329aeb256c668a81019ddd1ca12b4b04d781c0a855c63cacfbcc317f2d13b9"}
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {"type": "string", "minLength": 1},
+              "identity_sha256": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "transcriptSidecarProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "sha256", "size_bytes"],
+      "properties": {
+        "format": {"enum": ["txt", "srt", "vtt"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "whisperInference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunk_seconds", "chunk_count", "max_tokens_per_chunk", "sampling", "temperature", "target_device", "network_mode"],
+      "properties": {
+        "chunk_seconds": {"const": 30.0},
+        "chunk_count": {"type": "integer", "minimum": 1},
+        "max_tokens_per_chunk": {"const": 224},
+        "sampling": {"const": "greedy_argmax"},
+        "temperature": {"const": 0.0},
+        "target_device": {"const": "CPU"},
+        "network_mode": {"const": "disabled"}
+      }
+    },
+    "transcriptMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "text", "segments", "statistics", "model", "sidecar", "inference"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {"type": "string"},
+        "method": {"enum": ["wolfram_whisper_v1_tiny", "sidecar", "disabled", "configuration"]},
+        "text": {"type": "string"},
+        "segments": {"type": "array", "items": {"$ref": "#/$defs/transcriptSegment"}},
+        "statistics": {"$ref": "#/$defs/transcriptStatistics"},
+        "model": {"oneOf": [{"$ref": "#/$defs/whisperModel"}, {"type": "null"}]},
+        "sidecar": {"oneOf": [{"$ref": "#/$defs/transcriptSidecarProvenance"}, {"type": "null"}]},
+        "inference": {"oneOf": [{"$ref": "#/$defs/whisperInference"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "AVAILABLE"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "reason": {"const": ""},
+              "method": {"enum": ["wolfram_whisper_v1_tiny", "sidecar"]},
+              "text": {"type": "string", "minLength": 1},
+              "segments": {"minItems": 1}
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {"type": "string", "minLength": 1},
+              "text": {"const": ""},
+              "segments": {"maxItems": 0},
+              "sidecar": {"type": "null"},
+              "inference": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "AVAILABLE"}, "method": {"const": "sidecar"}},
+            "required": ["status", "method"]
+          },
+          "then": {
+            "properties": {
+              "model": {"type": "null"},
+              "sidecar": {"$ref": "#/$defs/transcriptSidecarProvenance"},
+              "inference": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "AVAILABLE"}, "method": {"const": "wolfram_whisper_v1_tiny"}},
+            "required": ["status", "method"]
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "allOf": [
+                  {"$ref": "#/$defs/whisperModel"},
+                  {"properties": {"status": {"const": "VERIFIED"}}}
+                ]
+              },
+              "sidecar": {"type": "null"},
+              "inference": {"$ref": "#/$defs/whisperInference"}
+            }
+          }
+        }
+      ]
+    },
+    "measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_seconds",
+        "audio_duration_seconds",
+        "sample_rate_hz",
+        "channel_count",
+        "rms_amplitude",
+        "peak_amplitude",
+        "integrated_loudness_lufs",
+        "audible_intervals_seconds",
+        "silence_intervals_seconds",
+        "spectral_centroid_hz",
+        "measurement_series",
+        "evidence_events",
+        "tabular_summary",
+        "video",
+        "video_analytics",
+        "audio_analytics",
+        "transcript"
+      ],
+      "properties": {
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "audio_duration_seconds": {"type": ["number", "null"], "exclusiveMinimum": 0.0},
+        "sample_rate_hz": {"type": ["integer", "null"], "minimum": 1},
+        "channel_count": {"type": ["integer", "null"], "minimum": 1},
+        "rms_amplitude": {"type": ["number", "null"], "minimum": 0.0},
+        "peak_amplitude": {"type": ["number", "null"], "minimum": 0.0},
+        "integrated_loudness_lufs": {"$ref": "#/$defs/nullableNumber"},
+        "audible_intervals_seconds": {"$ref": "#/$defs/intervals"},
+        "silence_intervals_seconds": {"$ref": "#/$defs/intervals"},
+        "spectral_centroid_hz": {"$ref": "#/$defs/nullableSummary"},
+        "measurement_series": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["time_count", "component_names"],
+          "properties": {
+            "time_count": {"type": "integer", "minimum": 0},
+            "component_names": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "evidence_events": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_count", "event_types"],
+          "properties": {
+            "event_count": {"type": "integer", "minimum": 2, "maximum": 4},
+            "event_types": {"type": "array", "minItems": 2, "maxItems": 4, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "tabular_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["row_count", "column_names"],
+          "properties": {
+            "row_count": {"type": "integer", "minimum": 2, "maximum": 4},
+            "column_names": {"type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "video": {"$ref": "#/$defs/videoMeasurements"},
+        "video_analytics": {"$ref": "#/$defs/videoAnalytics"},
+        "audio_analytics": {"$ref": "#/$defs/audioAnalytics"},
+        "transcript": {"$ref": "#/$defs/transcriptMeasurement"}
+      }
+    },
+    "provenanceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_count", "artifact_count", "integrity_conflict_count", "evidence_sha256"],
+      "properties": {
+        "task_count": {"enum": [2, 4]},
+        "artifact_count": {"enum": [1, 2]},
+        "integrity_conflict_count": {"const": 0},
+        "evidence_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "media_type", "sha256", "size_bytes"],
+      "properties": {
+        "path": {
+          "enum": [
+            "analysis-notebook.nb",
+            "audio-overview.png",
+            "audio-overview.svg",
+            "report.html",
+            "report.md",
+            "video-contact-sheet.png",
+            "video-summary.png"
+          ]
+        },
+        "media_type": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

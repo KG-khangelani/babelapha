@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KG-khangelani/babelapha/main/contracts/mathematica-local-source-evidence-v2.schema.json",
+  "title": "Babelapha Mathematica local source evidence v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_type",
+    "canonicalization",
+    "object_id",
+    "run_id",
+    "source",
+    "transcript_sidecar",
+    "events"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0.0"},
+    "evidence_type": {"const": "BABELAPHA_LOCAL_SOURCE_V2"},
+    "canonicalization": {"const": "SORTED_INDENTED_JSON_V1"},
+    "object_id": {"type": "string", "pattern": "^local-[a-z0-9][a-z0-9-]{0,80}-[a-f0-9]{12}$"},
+    "run_id": {"type": "string", "pattern": "^local-[a-f0-9]{16}$"},
+    "source": {"$ref": "#/$defs/source"},
+    "transcript_sidecar": {
+      "oneOf": [
+        {"$ref": "#/$defs/transcriptSidecar"},
+        {"type": "null"}
+      ]
+    },
+    "events": {
+      "type": "array",
+      "oneOf": [
+        {
+          "prefixItems": [
+            {"$ref": "#/$defs/sourceDiscovered"},
+            {"$ref": "#/$defs/sourceVerified"}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "prefixItems": [
+            {"$ref": "#/$defs/sourceDiscovered"},
+            {"$ref": "#/$defs/sourceVerified"},
+            {"$ref": "#/$defs/transcriptDiscovered"},
+            {"$ref": "#/$defs/transcriptVerified"}
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^ingest/[^/\\\\]+$"},
+        "filename": {"type": "string", "pattern": "^[^/\\\\]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"type": "string", "pattern": "^video/[A-Za-z0-9.+-]+$"}
+      }
+    },
+    "transcriptSidecar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filename", "sha256", "size_bytes", "media_type", "format"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^transcripts/[^/\\\\]+$"},
+        "filename": {"type": "string", "pattern": "^[^/\\\\]+\\.(txt|srt|vtt)$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"enum": ["text/plain", "application/x-subrip", "text/vtt"]},
+        "format": {"enum": ["txt", "srt", "vtt"]}
+      }
+    },
+    "eventBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "event_type", "stage", "status", "artifact_count"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "event_type": {"type": "string"},
+        "stage": {"type": "string"},
+        "status": {"const": "SUCCEEDED"},
+        "artifact_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "sourceDiscovered": {
+      "allOf": [
+        {"$ref": "#/$defs/eventBase"},
+        {"properties": {"sequence": {"const": 1}, "event_type": {"const": "SOURCE_DISCOVERED"}, "stage": {"const": "ingest"}, "artifact_count": {"const": 1}}}
+      ]
+    },
+    "sourceVerified": {
+      "allOf": [
+        {"$ref": "#/$defs/eventBase"},
+        {"properties": {"sequence": {"const": 2}, "event_type": {"const": "SOURCE_HASH_VERIFIED"}, "stage": {"const": "prepare"}, "artifact_count": {"const": 1}}}
+      ]
+    },
+    "transcriptDiscovered": {
+      "allOf": [
+        {"$ref": "#/$defs/eventBase"},
+        {"properties": {"sequence": {"const": 3}, "event_type": {"const": "TRANSCRIPT_SOURCE_DISCOVERED"}, "stage": {"const": "transcripts"}, "artifact_count": {"const": 2}}}
+      ]
+    },
+    "transcriptVerified": {
+      "allOf": [
+        {"$ref": "#/$defs/eventBase"},
+        {"properties": {"sequence": {"const": 4}, "event_type": {"const": "TRANSCRIPT_SOURCE_HASH_VERIFIED"}, "stage": {"const": "prepare"}, "artifact_count": {"const": 2}}}
+      ]
+    }
+  }
+}

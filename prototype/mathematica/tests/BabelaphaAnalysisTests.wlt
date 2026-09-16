@@ -1,6 +1,6 @@
 validInput = <|
-    "schema_version" -> "1.0.0",
-    "analysis_id" -> "mathematica-local-media-lab-v1",
+    "schema_version" -> "2.0.0",
+    "analysis_id" -> "mathematica-local-media-lab-v2",
     "object_id" -> "local-sample-0123456789ab",
     "run_id" -> "local-0123456789abcdef",
     "package_sha256" -> BabelaphaAnalysis`PackageSourceHash[],
@@ -10,6 +10,10 @@ validInput = <|
         "sha256" -> StringRepeat["a", 64],
         "size_bytes" -> 1024,
         "media_type" -> "video/mp4"
+    |>,
+    "transcript" -> <|
+        "mode" -> "prefer_sidecar",
+        "sidecar" -> Null
     |>,
     "evidence" -> <|
         "path" -> "artefacts/source-evidence.json",
@@ -84,4 +88,61 @@ VerificationTest[
     ],
     10,
     TestID -> "typed-input-failure-has-stable-exit-code"
+]
+
+VerificationTest[
+    Module[{invalid = validInput},
+        invalid["transcript", "mode"] = "cloud";
+        FailureQ[BabelaphaAnalysis`ValidateAnalysisInput[invalid]]
+    ],
+    True,
+    TestID -> "unsupported-transcript-mode-is-rejected"
+]
+
+VerificationTest[
+    Module[{invalid = validInput},
+        invalid["transcript", "mode"] = "sidecar";
+        FailureQ[BabelaphaAnalysis`ValidateAnalysisInput[invalid]]
+    ],
+    True,
+    TestID -> "sidecar-mode-requires-sidecar"
+]
+
+VerificationTest[
+    Module[{invalid = validInput},
+        invalid["object_id"] = "x";
+        FailureQ[BabelaphaAnalysis`ValidateAnalysisInput[invalid]]
+    ],
+    True,
+    TestID -> "noncanonical-object-id-is-rejected"
+]
+
+VerificationTest[
+    Module[{invalid = validInput},
+        invalid["run_id"] = "y";
+        FailureQ[BabelaphaAnalysis`ValidateAnalysisInput[invalid]]
+    ],
+    True,
+    TestID -> "noncanonical-run-id-is-rejected"
+]
+
+VerificationTest[
+    Module[{invalid = validInput},
+        invalid["source", "path"] = "ingest/nested/sample.mp4";
+        FailureQ[BabelaphaAnalysis`ValidateAnalysisInput[invalid]]
+    ],
+    True,
+    TestID -> "nested-ingest-source-is-rejected"
+]
+
+VerificationTest[
+    Module[{path, result},
+        path = FileNameJoin[{$TemporaryDirectory, "babelapha-out-of-range.srt"}];
+        Export[path, "1\n00:00:12,000 --> 00:00:15,000\nToo late.\n", "Text"];
+        result = BabelaphaAnalysis`PackageScope`analyzeTranscriptSidecar[path, 10.];
+        DeleteFile[path];
+        Lookup[result, "status", ""]
+    ],
+    "UNAVAILABLE",
+    TestID -> "out-of-range-sidecar-cue-is-unavailable"
 ]

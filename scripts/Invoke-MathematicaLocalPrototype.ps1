@@ -12,6 +12,10 @@ param(
     [double]$HopSeconds = 0.02,
     [ValidateRange(0, 2147483647)]
     [int]$RandomSeed = 20260916,
+    [ValidateSet("automatic", "prefer_sidecar", "sidecar", "disabled")]
+    [string]$TranscriptMode = "prefer_sidecar",
+    [switch]$PrepareSpeechModel,
+    [switch]$PrepareSpeechModelOnly,
     [switch]$SkipWolframTests,
     [switch]$VerifyRepeatability,
     [switch]$PreflightOnly
@@ -25,6 +29,9 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 if ($HopSeconds -gt $FrameSeconds) {
     throw "HopSeconds must not exceed FrameSeconds."
 }
+if ($PrepareSpeechModelOnly) {
+    $PrepareSpeechModel = $true
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if ([string]::IsNullOrWhiteSpace($Workspace)) {
@@ -34,6 +41,7 @@ $workspaceRoot = [System.IO.Path]::GetFullPath($Workspace)
 $prototypeRoot = Join-Path $repoRoot "prototype\mathematica"
 $boundaryScript = Join-Path $prototypeRoot "local_boundary.py"
 $analysisScript = Join-Path $prototypeRoot "analyze.wls"
+$speechModelScript = Join-Path $prototypeRoot "cache-whisper-model.wls"
 $testScript = Join-Path $prototypeRoot "tests\run-tests.wls"
 
 function Resolve-CommandPath {
@@ -270,6 +278,8 @@ $preflight = [ordered]@{
     status = "READY"
     local_only = $true
     media_backend = "wolfram-import"
+    transcript_mode = $TranscriptMode
+    speech_model_cache_requested = [bool]$PrepareSpeechModel
     wolframscript_path = $wolframScript
     wolfram_kernel_path = $runtime.KernelPath
     wolfram_version = $runtime.Version
@@ -289,6 +299,32 @@ foreach ($requiredFile in @($boundaryScript, $analysisScript, $testScript)) {
     }
 }
 
+if ($PrepareSpeechModel) {
+    if (-not (Test-Path -LiteralPath $speechModelScript -PathType Leaf)) {
+        throw "The local speech-model cache script is missing: $speechModelScript"
+    }
+    $modelLogDirectory = Join-Path $workspaceRoot "logs"
+    [void](New-Item -ItemType Directory -Path $modelLogDirectory -Force)
+    $modelLog = Join-Path $modelLogDirectory "mathematica-model-cache.log"
+    Invoke-LoggedCommand `
+        -Label "Cache and verify the Wolfram Whisper Tiny model" `
+        -FilePath $wolframScript `
+        -Arguments @("-local", $runtime.KernelPath, "-file", $speechModelScript) `
+        -LogPath $modelLog
+}
+
+if ($PrepareSpeechModelOnly) {
+    [ordered]@{
+        status = "MODEL_READY"
+        local_only_after_cache = $true
+        model = "Wolfram Whisper-V1 Nets / Tiny"
+        verification_log = $modelLog
+        wolfram_version = $runtime.Version
+        wolfram_kernel = $runtime.KernelPath
+    } | ConvertTo-Json -Depth 4
+    return
+}
+
 & $python $boundaryScript init --workspace $workspaceRoot
 if ($LASTEXITCODE -ne 0) {
     throw "Could not initialize the local prototype workspace."
@@ -306,7 +342,7 @@ if ($ingestFiles.Count -ne 1) {
     $names = ($ingestFiles.Name | Sort-Object) -join ', '
     throw "The ingest directory must contain exactly one media file; found $($ingestFiles.Count): $names"
 }
-$supportedExtensions = @('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi')
+$supportedExtensions = @('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi', '.mpeg', '.mpg', '.ts')
 if ($ingestFiles[0].Extension.ToLowerInvariant() -notin $supportedExtensions) {
     throw "Unsupported local video extension '$($ingestFiles[0].Extension)'. Supported: $($supportedExtensions -join ', ')"
 }
@@ -323,7 +359,8 @@ $prepareArguments = @(
     "--silence-threshold-db", $SilenceThresholdDb.ToString([Globalization.CultureInfo]::InvariantCulture),
     "--frame-seconds", $FrameSeconds.ToString([Globalization.CultureInfo]::InvariantCulture),
     "--hop-seconds", $HopSeconds.ToString([Globalization.CultureInfo]::InvariantCulture),
-    "--random-seed", $RandomSeed.ToString([Globalization.CultureInfo]::InvariantCulture)
+    "--random-seed", $RandomSeed.ToString([Globalization.CultureInfo]::InvariantCulture),
+    "--transcript-mode", $TranscriptMode
 )
 
 Invoke-LoggedCommand `
@@ -335,17 +372,31 @@ Invoke-LoggedCommand `
 $artefactsDirectory = Join-Path $workspaceRoot "artefacts"
 $analysisInput = Join-Path $artefactsDirectory "analysis-input.json"
 $runtimeManifest = Join-Path $artefactsDirectory "runtime.json"
+$preparedInput = Get-Content -LiteralPath $analysisInput -Raw | ConvertFrom-Json -Depth 20
 $gitCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) {
     $gitCommit = $null
 }
+$gitStatus = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) {
+    $gitStatus = @()
+    $gitWorktreeClean = $false
+}
+else {
+    $gitWorktreeClean = $gitStatus.Count -eq 0
+}
 $runtimeRecord = [ordered]@{
-    schema_version = "1.0.0"
+    schema_version = "2.0.0"
     recorded_at = (Get-Date).ToUniversalTime().ToString("o")
     local_only = $true
     workspace = $workspaceRoot
     source_path = $ingestFiles[0].FullName
+    analysis_id = [string]$preparedInput.analysis_id
+    run_id = [string]$preparedInput.run_id
+    package_sha256 = [string]$preparedInput.package_sha256
     git_commit = $gitCommit
+    git_worktree_clean = $gitWorktreeClean
+    git_status_entry_count = $gitStatus.Count
     wolfram = [ordered]@{
         wolframscript_path = $wolframScript
         kernel_path = $runtime.KernelPath
@@ -365,7 +416,9 @@ $runtimeRecord = [ordered]@{
         frame_seconds = $FrameSeconds
         hop_seconds = $HopSeconds
         random_seed = $RandomSeed
+        transcript_mode = $TranscriptMode
     }
+    speech_model_cache_requested = [bool]$PrepareSpeechModel
     repeatability_requested = [bool]$VerifyRepeatability
 }
 $runtimeRecord |
@@ -422,7 +475,7 @@ if ($VerifyRepeatability) {
         throw "Repeatability verification failed: canonical result hashes differ ($firstResultHash vs $secondResultHash)."
     }
     $repeatabilityRecord = [ordered]@{
-        schema_version = "1.0.0"
+        schema_version = "2.0.0"
         verified = $true
         run_count = 2
         canonical_result_sha256 = $secondResultHash

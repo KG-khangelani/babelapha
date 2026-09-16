@@ -21,8 +21,9 @@ import tempfile
 import wave
 
 
-SCHEMA_VERSION = "1.0.0"
-ANALYSIS_ID = "mathematica-local-media-lab-v1"
+SCHEMA_VERSION = "2.0.0"
+SOURCE_EVIDENCE_VERSION = "2.0.0"
+ANALYSIS_ID = "mathematica-local-media-lab-v2"
 CANONICALIZATION = "SORTED_INDENTED_JSON_V1"
 PACKAGE_KERNEL_DIRECTORY = (
     Path(__file__).resolve().parent / "BabelaphaAnalysis" / "Kernel"
@@ -47,11 +48,52 @@ VIDEO_MEDIA_TYPES = {
     ".webm": "video/webm",
 }
 
+TRANSCRIPT_MEDIA_TYPES = {
+    ".txt": ("text/plain", "txt"),
+    ".srt": ("application/x-subrip", "srt"),
+    ".vtt": ("text/vtt", "vtt"),
+}
+
+TRANSCRIPT_MODES = {"automatic", "prefer_sidecar", "sidecar", "disabled"}
+
+WHISPER_MODEL_IDENTITY = {
+    "repository_resource_name": "Whisper-V1 Nets",
+    "resource_uuid": "5211d691-293f-417d-a19f-f1e5faef3fb7",
+    "resource_version": "1.0.0",
+    "size": "Tiny",
+    "target_device": "CPU",
+    "network_mode": "disabled",
+    "identity_sha256": "49329aeb256c668a81019ddd1ca12b4b04d781c0a855c63cacfbcc317f2d13b9",
+}
+
+WHISPER_ARTIFACTS = {
+    "audio_encoder": {
+        "content_element": "EvaluationNet:tiny_encoder",
+        "sha256": "0c42ff9e0c142bf5f8badf35d9ce337ea9b4d4edce761b31caaebe53c25a464c",
+        "size_bytes": 32934064,
+    },
+    "text_decoder": {
+        "content_element": "EvaluationNet:tiny_decoder",
+        "sha256": "4d39de7df517ac91679b4daa9bd359dba0e85a1f9748699090c1c946a7ec4f9a",
+        "size_bytes": 197918640,
+    },
+    "labels": {
+        "content_element": "Labels",
+        "sha256": "d3c09f659b7ef46cfaae621574a751fcac71656c6436e997f71129006ccc16ef",
+        "size_bytes": 437955,
+    },
+}
+
 CAPABILITY_KEYS = {
     "video_import",
     "audio_track",
     "video_summary_plot",
     "frame_analysis",
+    "color_analysis",
+    "motion_analysis",
+    "sound_analysis",
+    "transcript_analysis",
+    "cross_modal_analysis",
     "time_series",
     "event_series",
     "tabular",
@@ -214,7 +256,15 @@ def initialize_workspace(workspace: str | Path) -> dict:
     root = _workspace_path(workspace)
     root.mkdir(parents=True, exist_ok=True)
     directories = {}
-    for name in ("ingest", "artefacts", "output", "logs", "work"):
+    for name in (
+        "ingest",
+        "transcripts",
+        "models",
+        "artefacts",
+        "output",
+        "logs",
+        "work",
+    ):
         path = root / name
         if path.exists() and (not path.is_dir() or path.is_symlink()):
             raise InputContractError(
@@ -317,7 +367,9 @@ def _media_type(path: Path) -> str:
 
 def _find_single_video(root: Path) -> Path:
     ingest = root / "ingest"
-    entries = [entry for entry in ingest.iterdir() if entry.name != ".gitkeep"]
+    entries = [
+        entry for entry in ingest.iterdir() if entry.name not in {".gitignore", ".gitkeep"}
+    ]
     if len(entries) != 1:
         raise InputContractError(
             f"ingest/ must contain exactly one video file; found {len(entries)} entries"
@@ -329,6 +381,36 @@ def _find_single_video(root: Path) -> Path:
         raise InputContractError("The ingest video must not be empty")
     _media_type(source)
     return source
+
+
+def _find_optional_transcript(root: Path, source: Path) -> Path | None:
+    transcript_directory = root / "transcripts"
+    entries = [
+        entry
+        for entry in transcript_directory.iterdir()
+        if entry.name not in {".gitignore", ".gitkeep"}
+    ]
+    if not entries:
+        return None
+    supported = [entry for entry in entries if entry.suffix.lower() in TRANSCRIPT_MEDIA_TYPES]
+    if len(supported) != len(entries):
+        unsupported = sorted(entry.name for entry in entries if entry not in supported)
+        raise InputContractError(
+            "transcripts/ contains unsupported entries: " + ", ".join(unsupported)
+        )
+    matching = [entry for entry in supported if entry.stem.casefold() == source.stem.casefold()]
+    selected = matching if matching else supported
+    if len(selected) != 1:
+        raise InputContractError(
+            "transcripts/ must contain at most one sidecar, or exactly one whose basename "
+            f"matches {source.stem!r}; found {len(supported)} supported files"
+        )
+    sidecar = selected[0]
+    if not sidecar.is_file() or sidecar.is_symlink():
+        raise InputContractError("The transcript sidecar must be a real, non-symlink file")
+    if sidecar.stat().st_size <= 0:
+        raise InputContractError("The transcript sidecar must not be empty")
+    return sidecar
 
 
 def _slug(value: str) -> str:
@@ -392,12 +474,32 @@ def _source_record(source: Path) -> dict:
     }
 
 
-def _run_id(source_sha256: str, parameters: dict, package_sha256: str) -> str:
+def _transcript_record(sidecar: Path | None) -> dict | None:
+    if sidecar is None:
+        return None
+    media_type, transcript_format = TRANSCRIPT_MEDIA_TYPES[sidecar.suffix.lower()]
+    return {
+        "path": f"transcripts/{sidecar.name}",
+        "filename": sidecar.name,
+        "sha256": sha256_file(sidecar),
+        "size_bytes": sidecar.stat().st_size,
+        "media_type": media_type,
+        "format": transcript_format,
+    }
+
+
+def _run_id(
+    source_sha256: str,
+    parameters: dict,
+    package_sha256: str,
+    transcript: dict,
+) -> str:
     material = {
         "analysis_id": ANALYSIS_ID,
         "package_sha256": package_sha256,
         "parameters": parameters,
         "source_sha256": source_sha256,
+        "transcript": transcript,
     }
     digest = hashlib.sha256(canonical_json_bytes(material)).hexdigest()
     return f"local-{digest[:16]}"
@@ -407,16 +509,34 @@ def prepare_analysis_input(
     workspace: str | Path,
     *,
     parameters: dict | None = None,
+    transcript_mode: str = "prefer_sidecar",
 ) -> dict:
     """Hash exactly one local video and write deterministic Wolfram input evidence."""
     layout = initialize_workspace(workspace)
     root = Path(layout["workspace"])
     source_path = _find_single_video(root)
     source = _source_record(source_path)
+    transcript_mode = transcript_mode.casefold()
+    if transcript_mode not in TRANSCRIPT_MODES:
+        raise InputContractError(
+            f"Unsupported transcript mode {transcript_mode!r}; expected one of "
+            + ", ".join(sorted(TRANSCRIPT_MODES))
+        )
+    sidecar_path = _find_optional_transcript(root, source_path)
+    sidecar = _transcript_record(sidecar_path)
+    if transcript_mode == "sidecar" and sidecar is None:
+        raise InputContractError(
+            "Transcript mode 'sidecar' requires one .txt, .srt, or .vtt file in transcripts/"
+        )
+    if transcript_mode == "disabled" and sidecar is not None:
+        raise InputContractError(
+            "Transcript mode 'disabled' requires transcripts/ to contain no sidecar"
+        )
+    transcript = {"mode": transcript_mode, "sidecar": sidecar}
     normalized_parameters = _parameters(parameters or DEFAULT_PARAMETERS)
     package_sha256 = package_source_hash()
     object_id = f"local-{_slug(source_path.stem)}-{source['sha256'][:12]}"
-    run_id = _run_id(source["sha256"], normalized_parameters, package_sha256)
+    run_id = _run_id(source["sha256"], normalized_parameters, package_sha256, transcript)
 
     # A newly prepared valid run invalidates prior canonical/raw success markers.
     # Other generated artifacts may remain for inspection, but cannot be mistaken
@@ -433,29 +553,51 @@ def prepare_analysis_input(
             raise InputContractError("artefacts/repeatability.json must be a real file")
         repeatability_record.unlink()
 
+    evidence_events = [
+        {
+            "sequence": 1,
+            "event_type": "SOURCE_DISCOVERED",
+            "stage": "ingest",
+            "status": "SUCCEEDED",
+            "artifact_count": 1,
+        },
+        {
+            "sequence": 2,
+            "event_type": "SOURCE_HASH_VERIFIED",
+            "stage": "prepare",
+            "status": "SUCCEEDED",
+            "artifact_count": 1,
+        },
+    ]
+    if sidecar is not None:
+        evidence_events.extend(
+            [
+                {
+                    "sequence": 3,
+                    "event_type": "TRANSCRIPT_SOURCE_DISCOVERED",
+                    "stage": "transcripts",
+                    "status": "SUCCEEDED",
+                    "artifact_count": 2,
+                },
+                {
+                    "sequence": 4,
+                    "event_type": "TRANSCRIPT_SOURCE_HASH_VERIFIED",
+                    "stage": "prepare",
+                    "status": "SUCCEEDED",
+                    "artifact_count": 2,
+                },
+            ]
+        )
+
     evidence = {
-        "schema_version": SCHEMA_VERSION,
-        "evidence_type": "BABELAPHA_LOCAL_SOURCE_V1",
+        "schema_version": SOURCE_EVIDENCE_VERSION,
+        "evidence_type": "BABELAPHA_LOCAL_SOURCE_V2",
         "canonicalization": CANONICALIZATION,
         "object_id": object_id,
         "run_id": run_id,
         "source": source,
-        "events": [
-            {
-                "sequence": 1,
-                "event_type": "SOURCE_DISCOVERED",
-                "stage": "ingest",
-                "status": "SUCCEEDED",
-                "artifact_count": 1,
-            },
-            {
-                "sequence": 2,
-                "event_type": "SOURCE_HASH_VERIFIED",
-                "stage": "prepare",
-                "status": "SUCCEEDED",
-                "artifact_count": 1,
-            },
-        ],
+        "transcript_sidecar": sidecar,
+        "events": evidence_events,
     }
     evidence_path = root / "artefacts" / "source-evidence.json"
     evidence_body = canonical_json_bytes(evidence)
@@ -468,6 +610,7 @@ def prepare_analysis_input(
         "run_id": run_id,
         "package_sha256": package_sha256,
         "source": source,
+        "transcript": transcript,
         "evidence": {
             "path": "artefacts/source-evidence.json",
             "sha256": hashlib.sha256(evidence_body).hexdigest(),
@@ -485,6 +628,7 @@ def prepare_analysis_input(
         "run_id": run_id,
         "package_sha256": package_sha256,
         "source_sha256": source["sha256"],
+        "transcript_sha256": None if sidecar is None else sidecar["sha256"],
         "evidence_sha256": analysis_input["evidence"]["sha256"],
     }
 
@@ -509,6 +653,48 @@ def _validate_source(value: object, path: str, error_type) -> dict:
     return source
 
 
+def _validate_transcript_sidecar(value: object, path: str, error_type) -> dict | None:
+    if value is None:
+        return None
+    sidecar = _strict_fields(
+        value,
+        {"path", "filename", "sha256", "size_bytes", "media_type", "format"},
+        path,
+        error_type,
+    )
+    relative = _safe_relative_path(
+        sidecar["path"], "transcripts", f"{path}.path", error_type
+    )
+    filename = _string(sidecar["filename"], f"{path}.filename", error_type)
+    if PurePosixPath(relative).name != filename or "/" in filename or "\\" in filename:
+        raise error_type(f"{path}.filename must equal the basename of {path}.path")
+    _sha256(sidecar["sha256"], f"{path}.sha256", error_type)
+    _integer(sidecar["size_bytes"], f"{path}.size_bytes", error_type, minimum=1)
+    expected = TRANSCRIPT_MEDIA_TYPES.get(Path(filename).suffix.lower())
+    if expected is None:
+        raise error_type(f"{path} uses an unsupported transcript extension")
+    media_type = _string(sidecar["media_type"], f"{path}.media_type", error_type)
+    transcript_format = _string(sidecar["format"], f"{path}.format", error_type)
+    if (media_type, transcript_format) != expected:
+        raise error_type(f"{path} media type or format does not match its extension")
+    return sidecar
+
+
+def _validate_transcript_config(value: object, error_type=InputContractError) -> dict:
+    transcript = _strict_fields(value, {"mode", "sidecar"}, "transcript", error_type)
+    mode = _string(transcript["mode"], "transcript.mode", error_type)
+    if mode not in TRANSCRIPT_MODES:
+        raise error_type("transcript.mode is unsupported")
+    sidecar = _validate_transcript_sidecar(
+        transcript["sidecar"], "transcript.sidecar", error_type
+    )
+    if mode == "sidecar" and sidecar is None:
+        raise error_type("transcript.mode sidecar requires transcript.sidecar")
+    if mode == "disabled" and sidecar is not None:
+        raise error_type("transcript.mode disabled requires a null sidecar")
+    return {"mode": mode, "sidecar": sidecar}
+
+
 def _validate_evidence_document(evidence: dict, analysis_input: dict) -> None:
     _strict_fields(
         evidence,
@@ -519,27 +705,37 @@ def _validate_evidence_document(evidence: dict, analysis_input: dict) -> None:
             "object_id",
             "run_id",
             "source",
+            "transcript_sidecar",
             "events",
         },
         "source evidence",
         IntegrityError,
     )
-    if evidence["schema_version"] != SCHEMA_VERSION:
+    if evidence["schema_version"] != SOURCE_EVIDENCE_VERSION:
         raise IntegrityError("Unsupported source evidence schema version")
-    if evidence["evidence_type"] != "BABELAPHA_LOCAL_SOURCE_V1":
+    if evidence["evidence_type"] != "BABELAPHA_LOCAL_SOURCE_V2":
         raise IntegrityError("Unsupported local source evidence type")
     if evidence["canonicalization"] != CANONICALIZATION:
         raise IntegrityError("Unsupported source evidence canonicalization")
     for field in ("object_id", "run_id", "source"):
         if evidence[field] != analysis_input[field]:
             raise IntegrityError(f"Source evidence {field} differs from analysis input")
+    if evidence["transcript_sidecar"] != analysis_input["transcript"]["sidecar"]:
+        raise IntegrityError("Source evidence transcript sidecar differs from analysis input")
     events = evidence["events"]
     expected_events = [
-        (1, "SOURCE_DISCOVERED", "ingest"),
-        (2, "SOURCE_HASH_VERIFIED", "prepare"),
+        (1, "SOURCE_DISCOVERED", "ingest", 1),
+        (2, "SOURCE_HASH_VERIFIED", "prepare", 1),
     ]
+    if analysis_input["transcript"]["sidecar"] is not None:
+        expected_events.extend(
+            [
+                (3, "TRANSCRIPT_SOURCE_DISCOVERED", "transcripts", 2),
+                (4, "TRANSCRIPT_SOURCE_HASH_VERIFIED", "prepare", 2),
+            ]
+        )
     if not isinstance(events, list) or len(events) != len(expected_events):
-        raise IntegrityError("Source evidence must contain the two local trust events")
+        raise IntegrityError("Source evidence does not contain the expected local trust events")
     for index, (event, expected) in enumerate(zip(events, expected_events)):
         event = _strict_fields(
             event,
@@ -547,15 +743,20 @@ def _validate_evidence_document(evidence: dict, analysis_input: dict) -> None:
             f"source evidence.events[{index}]",
             IntegrityError,
         )
-        actual = (event["sequence"], event["event_type"], event["stage"])
-        if actual != expected or event["status"] != "SUCCEEDED" or event["artifact_count"] != 1:
+        actual = (
+            event["sequence"],
+            event["event_type"],
+            event["stage"],
+            event["artifact_count"],
+        )
+        if actual != expected or event["status"] != "SUCCEEDED":
             raise IntegrityError(f"Source evidence.events[{index}] is not canonical")
 
 
 def validate_analysis_input(workspace: str | Path, input_path: Path | None = None) -> dict:
     """Re-prove the prepared input, source bytes, and local evidence bytes."""
     root = _workspace_path(workspace)
-    for name in ("ingest", "artefacts", "output"):
+    for name in ("ingest", "transcripts", "models", "artefacts", "output"):
         directory = root / name
         if not directory.is_dir() or directory.is_symlink():
             raise InputContractError(f"Workspace {name}/ must be a real directory")
@@ -580,6 +781,7 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
             "run_id",
             "package_sha256",
             "source",
+            "transcript",
             "evidence",
             "output_directory",
             "parameters",
@@ -603,6 +805,7 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
     if package_source_hash() != expected_package_sha256:
         raise IntegrityError("Wolfram package SHA-256 differs from analysis input")
     source = _validate_source(analysis_input["source"], "source", InputContractError)
+    transcript = _validate_transcript_config(analysis_input["transcript"])
     parameters = _parameters(analysis_input["parameters"])
     if analysis_input["output_directory"] != "output":
         raise InputContractError("output_directory must be the local output directory")
@@ -612,10 +815,21 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
         raise IntegrityError("Ingest video size differs from prepared source evidence")
     if sha256_file(source_path) != source["sha256"]:
         raise IntegrityError("Ingest video SHA-256 differs from prepared source evidence")
+    sidecar = transcript["sidecar"]
+    if sidecar is not None:
+        sidecar_path = _resolve_relative_file(
+            root, sidecar["path"], "transcripts", IntegrityError
+        )
+        if sidecar_path.stat().st_size != sidecar["size_bytes"]:
+            raise IntegrityError("Transcript sidecar size differs from prepared evidence")
+        if sha256_file(sidecar_path) != sidecar["sha256"]:
+            raise IntegrityError("Transcript sidecar SHA-256 differs from prepared evidence")
     if analysis_input["run_id"] != _run_id(
-        source["sha256"], parameters, expected_package_sha256
+        source["sha256"], parameters, expected_package_sha256, transcript
     ):
-        raise IntegrityError("run_id does not match source and parameter identity")
+        raise IntegrityError(
+            "run_id does not match source, transcript, parameter, and package identity"
+        )
     expected_object_id = f"local-{_slug(source_path.stem)}-{source['sha256'][:12]}"
     if analysis_input["object_id"] != expected_object_id:
         raise IntegrityError("object_id does not match source identity")
@@ -643,6 +857,142 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
         raise IntegrityError("Local source evidence bytes are not canonical")
     _validate_evidence_document(evidence, analysis_input)
     return analysis_input
+
+
+def _validate_runtime_manifest(root: Path, processor: dict, analysis_input: dict) -> None:
+    path = root / "artefacts" / "runtime.json"
+    if path.is_symlink() or not path.is_file():
+        raise ResultContractError(
+            "artefacts/runtime.json is required to bind the independently probed Wolfram runtime"
+        )
+    runtime = load_json(path, ResultContractError)
+    runtime = _strict_fields(
+        runtime,
+        {
+            "schema_version",
+            "recorded_at",
+            "local_only",
+            "workspace",
+            "source_path",
+            "analysis_id",
+            "run_id",
+            "package_sha256",
+            "git_commit",
+            "git_worktree_clean",
+            "git_status_entry_count",
+            "wolfram",
+            "python",
+            "analysis_parameters",
+            "speech_model_cache_requested",
+            "repeatability_requested",
+        },
+        "runtime manifest",
+        ResultContractError,
+    )
+    if runtime["schema_version"] != SCHEMA_VERSION or runtime["local_only"] is not True:
+        raise ResultContractError("runtime manifest must describe this local v2 workflow")
+    _string(runtime["recorded_at"], "runtime manifest.recorded_at", ResultContractError)
+    workspace = _string(runtime["workspace"], "runtime manifest.workspace", ResultContractError)
+    source_path = _string(
+        runtime["source_path"], "runtime manifest.source_path", ResultContractError
+    )
+    if Path(workspace).resolve() != root.resolve():
+        raise IntegrityError("Runtime manifest workspace differs from the validated workspace")
+    expected_source = (root / analysis_input["source"]["path"]).resolve()
+    if Path(source_path).resolve() != expected_source:
+        raise IntegrityError("Runtime manifest source differs from the verified input")
+    for name in ("analysis_id", "run_id", "package_sha256"):
+        if runtime[name] != analysis_input[name]:
+            raise IntegrityError(f"Runtime manifest {name} differs from the verified input")
+
+    git_commit = runtime["git_commit"]
+    if git_commit is not None and (
+        not isinstance(git_commit, str)
+        or not re.fullmatch(r"[a-f0-9]{40}(?:[a-f0-9]{24})?", git_commit)
+    ):
+        raise ResultContractError("runtime manifest.git_commit is invalid")
+    clean = runtime["git_worktree_clean"]
+    if not isinstance(clean, bool):
+        raise ResultContractError("runtime manifest.git_worktree_clean must be boolean")
+    status_count = _integer(
+        runtime["git_status_entry_count"],
+        "runtime manifest.git_status_entry_count",
+        ResultContractError,
+        minimum=0,
+    )
+    if clean != (status_count == 0):
+        raise ResultContractError("runtime manifest Git cleanliness fields disagree")
+
+    wolfram = _strict_fields(
+        runtime["wolfram"],
+        {
+            "wolframscript_path",
+            "kernel_path",
+            "version",
+            "version_number",
+            "release_number",
+            "system_id",
+            "processor_type",
+            "media_backend",
+        },
+        "runtime manifest.wolfram",
+        ResultContractError,
+    )
+    for name in ("wolframscript_path", "kernel_path", "processor_type"):
+        _string(wolfram[name], f"runtime manifest.wolfram.{name}", ResultContractError)
+    _number(
+        wolfram["version_number"],
+        "runtime manifest.wolfram.version_number",
+        ResultContractError,
+        minimum=15.0,
+    )
+    _integer(
+        wolfram["release_number"],
+        "runtime manifest.wolfram.release_number",
+        ResultContractError,
+        minimum=0,
+    )
+    if wolfram["media_backend"] != "Wolfram Language Import":
+        raise ResultContractError("runtime manifest.wolfram.media_backend is unsupported")
+    if wolfram["version"] != processor["wolfram_version"]:
+        raise IntegrityError(
+            "Result Wolfram version differs from the independently probed runtime"
+        )
+    if wolfram["system_id"] != processor["system_id"]:
+        raise IntegrityError(
+            "Result Wolfram system ID differs from the independently probed runtime"
+        )
+
+    python = _strict_fields(
+        runtime["python"],
+        {"executable", "role"},
+        "runtime manifest.python",
+        ResultContractError,
+    )
+    _string(python["executable"], "runtime manifest.python.executable", ResultContractError)
+    if python["role"] != "input and output contract boundary only":
+        raise ResultContractError("runtime manifest.python.role is unsupported")
+    runtime_parameters = _strict_fields(
+        runtime["analysis_parameters"],
+        {
+            "silence_threshold_db",
+            "frame_seconds",
+            "hop_seconds",
+            "random_seed",
+            "transcript_mode",
+        },
+        "runtime manifest.analysis_parameters",
+        ResultContractError,
+    )
+    if {
+        name: runtime_parameters[name] for name in DEFAULT_PARAMETERS
+    } != analysis_input["parameters"]:
+        raise IntegrityError("Runtime manifest parameters differ from the verified input")
+    if runtime_parameters["transcript_mode"] != analysis_input["transcript"]["mode"]:
+        raise IntegrityError("Runtime manifest transcript mode differs from the verified input")
+    for name in ("speech_model_cache_requested", "repeatability_requested"):
+        if not isinstance(runtime[name], bool):
+            raise ResultContractError(f"runtime manifest.{name} must be boolean")
 
 
 def _validate_intervals(value: object, path: str, duration: float) -> None:
@@ -738,6 +1088,9 @@ def _validate_capabilities(value: object) -> None:
     required_used = {
         "video_import",
         "frame_analysis",
+        "color_analysis",
+        "motion_analysis",
+        "cross_modal_analysis",
         "time_series",
         "event_series",
         "tabular",
@@ -849,7 +1202,617 @@ def _validate_video_measurements(value: object, duration: float) -> None:
         raise ResultContractError("Motion transition count must equal sampled frame count minus one")
 
 
-def _validate_measurements(value: object, capabilities: dict) -> None:
+def _validate_distribution(value: object, path: str) -> dict:
+    fields = {
+        "count",
+        "minimum",
+        "q05",
+        "q25",
+        "median",
+        "q75",
+        "q95",
+        "maximum",
+        "mean",
+        "standard_deviation",
+    }
+    distribution = _strict_fields(value, fields, path, ResultContractError)
+    count = _integer(distribution["count"], f"{path}.count", ResultContractError, minimum=0)
+    ordered_fields = ("minimum", "q05", "q25", "median", "q75", "q95", "maximum")
+    ordered = [
+        _number(distribution[name], f"{path}.{name}", ResultContractError, nullable=True)
+        for name in ordered_fields
+    ]
+    mean = _number(distribution["mean"], f"{path}.mean", ResultContractError, nullable=True)
+    deviation = _number(
+        distribution["standard_deviation"],
+        f"{path}.standard_deviation",
+        ResultContractError,
+        minimum=0.0,
+        nullable=True,
+    )
+    if count == 0:
+        if any(item is not None for item in (*ordered, mean, deviation)):
+            raise ResultContractError(f"{path} with count zero must contain null summaries")
+    else:
+        if any(item is None for item in (*ordered, mean, deviation)):
+            raise ResultContractError(f"{path} with observations must contain numeric summaries")
+        if ordered != sorted(ordered):
+            raise ResultContractError(f"{path} quantiles must be ordered")
+        if not ordered[0] <= mean <= ordered[-1]:
+            raise ResultContractError(f"{path}.mean must lie within its observed range")
+    return distribution
+
+
+def _validate_histogram(value: object, path: str) -> None:
+    histogram = _strict_fields(
+        value, {"bin_edges", "counts", "fractions"}, path, ResultContractError
+    )
+    edges = histogram["bin_edges"]
+    counts = histogram["counts"]
+    fractions = histogram["fractions"]
+    if not all(isinstance(item, list) for item in (edges, counts, fractions)):
+        raise ResultContractError(f"{path} arrays are required")
+    if len(counts) != len(fractions) or (counts and len(edges) != len(counts) + 1):
+        raise ResultContractError(f"{path} bin dimensions are inconsistent")
+    for index, edge in enumerate(edges):
+        _number(edge, f"{path}.bin_edges[{index}]", ResultContractError)
+    for index, count in enumerate(counts):
+        _integer(count, f"{path}.counts[{index}]", ResultContractError, minimum=0)
+    for index, fraction in enumerate(fractions):
+        _number(
+            fraction,
+            f"{path}.fractions[{index}]",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+        )
+    if fractions and not math.isclose(sum(fractions), 1.0, rel_tol=1e-8, abs_tol=1e-8):
+        raise ResultContractError(f"{path}.fractions must sum to one")
+
+
+def _validate_feature_availability(value: object, path: str) -> None:
+    availability = _strict_fields(
+        value, {"status", "observation_count", "reason"}, path, ResultContractError
+    )
+    status = _string(availability["status"], f"{path}.status", ResultContractError)
+    if status not in {"AVAILABLE", "UNAVAILABLE"}:
+        raise ResultContractError(f"{path}.status is unsupported")
+    count = _integer(
+        availability["observation_count"],
+        f"{path}.observation_count",
+        ResultContractError,
+        minimum=0,
+    )
+    reason = _string(
+        availability["reason"], f"{path}.reason", ResultContractError, nonempty=False
+    )
+    if status == "AVAILABLE" and (count < 1 or reason):
+        raise ResultContractError(f"{path} AVAILABLE status requires observations and no reason")
+    if status == "UNAVAILABLE" and not reason:
+        raise ResultContractError(f"{path} UNAVAILABLE status requires a reason")
+
+
+def _validate_audio_analytics(value: object, audio_available: bool) -> None:
+    path = "measurements.audio_analytics"
+    analytics = _strict_fields(
+        value,
+        {"status", "reason", "method", "dynamics", "distribution", "frequency", "pitch", "availability"},
+        path,
+        ResultContractError,
+    )
+    status = _string(analytics["status"], f"{path}.status", ResultContractError)
+    reason = _string(analytics["reason"], f"{path}.reason", ResultContractError, nonempty=False)
+    _string(analytics["method"], f"{path}.method", ResultContractError)
+    if audio_available and (status != "AVAILABLE" or reason):
+        raise ResultContractError("Available audio requires AVAILABLE extended analytics")
+    if not audio_available and (status != "UNAVAILABLE" or not reason):
+        raise ResultContractError("Unavailable audio requires explicit unavailable analytics")
+
+    dynamics = analytics["dynamics"]
+    distributions = analytics["distribution"]
+    frequency = analytics["frequency"]
+    if audio_available:
+        dynamics = _strict_fields(
+            dynamics,
+            {
+                "rms_amplitude", "peak_amplitude", "rms_dbfs", "local_loudness",
+                "crest_factor", "crest_factor_db", "local_dynamic_range_db",
+            },
+            f"{path}.dynamics",
+            ResultContractError,
+        )
+        for name in ("rms_amplitude", "peak_amplitude", "rms_dbfs", "local_loudness"):
+            _validate_distribution(dynamics[name], f"{path}.dynamics.{name}")
+        _number(dynamics["crest_factor"], f"{path}.dynamics.crest_factor", ResultContractError, minimum=0.0, nullable=True)
+        _number(dynamics["crest_factor_db"], f"{path}.dynamics.crest_factor_db", ResultContractError, nullable=True)
+        _number(dynamics["local_dynamic_range_db"], f"{path}.dynamics.local_dynamic_range_db", ResultContractError, minimum=0.0, nullable=True)
+        distributions = _strict_fields(
+            distributions,
+            {"rms_amplitude_histogram", "rms_dbfs_histogram"},
+            f"{path}.distribution",
+            ResultContractError,
+        )
+        _validate_histogram(distributions["rms_amplitude_histogram"], f"{path}.distribution.rms_amplitude_histogram")
+        _validate_histogram(distributions["rms_dbfs_histogram"], f"{path}.distribution.rms_dbfs_histogram")
+        frequency = _strict_fields(
+            frequency,
+            {"spectral_centroid_hz", "spectral_spread_hz", "zero_crossing_rate", "nyquist_frequency_hz"},
+            f"{path}.frequency",
+            ResultContractError,
+        )
+        for name in ("spectral_centroid_hz", "spectral_spread_hz", "zero_crossing_rate"):
+            _validate_distribution(frequency[name], f"{path}.frequency.{name}")
+        _number(frequency["nyquist_frequency_hz"], f"{path}.frequency.nyquist_frequency_hz", ResultContractError, minimum=0.0)
+    else:
+        for name, candidate in (("dynamics", dynamics), ("distribution", distributions), ("frequency", frequency)):
+            if candidate != {}:
+                raise ResultContractError(f"{path}.{name} must be empty without audio")
+
+    pitch = _strict_fields(
+        analytics["pitch"],
+        {"status", "reason", "method", "observation_count", "window_count", "coverage_fraction", "fundamental_frequency_hz"},
+        f"{path}.pitch",
+        ResultContractError,
+    )
+    pitch_status = _string(
+        pitch["status"], f"{path}.pitch.status", ResultContractError
+    )
+    if pitch_status not in {"AVAILABLE", "UNAVAILABLE"}:
+        raise ResultContractError(f"{path}.pitch.status is unsupported")
+    pitch_reason = _string(
+        pitch["reason"],
+        f"{path}.pitch.reason",
+        ResultContractError,
+        nonempty=False,
+    )
+    _string(pitch["method"], f"{path}.pitch.method", ResultContractError)
+    pitch_count = _integer(pitch["observation_count"], f"{path}.pitch.observation_count", ResultContractError, minimum=0)
+    window_count = _integer(pitch["window_count"], f"{path}.pitch.window_count", ResultContractError, minimum=0)
+    coverage = _number(pitch["coverage_fraction"], f"{path}.pitch.coverage_fraction", ResultContractError, minimum=0.0, maximum=1.0)
+    if pitch_count > window_count or (window_count and not math.isclose(coverage, pitch_count / window_count, rel_tol=1e-8, abs_tol=1e-8)):
+        raise ResultContractError(f"{path}.pitch coverage is inconsistent")
+    if not window_count and coverage != 0.0:
+        raise ResultContractError(f"{path}.pitch coverage requires observed windows")
+    if pitch_status == "AVAILABLE" and (pitch_count < 1 or pitch_reason):
+        raise ResultContractError(
+            f"{path}.pitch AVAILABLE status requires observations and no reason"
+        )
+    if pitch_status == "UNAVAILABLE" and (pitch_count != 0 or not pitch_reason):
+        raise ResultContractError(
+            f"{path}.pitch UNAVAILABLE status requires zero observations and a reason"
+        )
+    pitch_distribution = _validate_distribution(
+        pitch["fundamental_frequency_hz"],
+        f"{path}.pitch.fundamental_frequency_hz",
+    )
+    if pitch_distribution["count"] != pitch_count:
+        raise ResultContractError(
+            f"{path}.pitch distribution count differs from observation_count"
+        )
+
+    availability = _strict_fields(
+        analytics["availability"],
+        {"rms_amplitude", "peak_amplitude", "spectral_centroid", "spectral_spread", "zero_crossing_rate", "local_loudness", "fundamental_frequency"},
+        f"{path}.availability",
+        ResultContractError,
+    )
+    for name, record in availability.items():
+        _validate_feature_availability(record, f"{path}.availability.{name}")
+    pitch_availability = availability["fundamental_frequency"]
+    if (
+        pitch_availability["status"] != pitch_status
+        or pitch_availability["observation_count"] != pitch_count
+    ):
+        raise ResultContractError(
+            f"{path}.pitch differs from fundamental-frequency availability"
+        )
+
+
+def _validate_rgb(value: object, path: str) -> None:
+    rgb = _strict_fields(value, {"red", "green", "blue"}, path, ResultContractError)
+    for name in ("red", "green", "blue"):
+        _number(rgb[name], f"{path}.{name}", ResultContractError, minimum=0.0, maximum=1.0)
+
+
+def _validate_video_analytics(value: object, duration: float, frame_count: int) -> None:
+    path = "measurements.video_analytics"
+    analytics = _strict_fields(
+        value, {"sample_times_seconds", "per_frame", "color", "scene_changes"}, path, ResultContractError
+    )
+    times = analytics["sample_times_seconds"]
+    frames = analytics["per_frame"]
+    if not isinstance(times, list) or not isinstance(frames, list) or len(times) != frame_count or len(frames) != frame_count:
+        raise ResultContractError(f"{path} must contain one timestamped row per sampled frame")
+    previous = -1.0
+    for index, time_value in enumerate(times):
+        time_value = _number(time_value, f"{path}.sample_times_seconds[{index}]", ResultContractError, minimum=0.0, maximum=duration)
+        if time_value < previous:
+            raise ResultContractError(f"{path}.sample_times_seconds must be ordered")
+        previous = time_value
+    frame_fields = {
+        "sample_index", "time_seconds", "frame_difference", "color_histogram_distance",
+        "brightness", "saturation", "contrast", "colorfulness", "mean_rgb", "mean_color_hex",
+    }
+    for index, raw_frame in enumerate(frames):
+        frame = _strict_fields(raw_frame, frame_fields, f"{path}.per_frame[{index}]", ResultContractError)
+        if _integer(frame["sample_index"], f"{path}.per_frame[{index}].sample_index", ResultContractError, minimum=1) != index + 1:
+            raise ResultContractError(f"{path}.per_frame sample indexes must be consecutive")
+        frame_time = _number(frame["time_seconds"], f"{path}.per_frame[{index}].time_seconds", ResultContractError, minimum=0.0, maximum=duration)
+        if not math.isclose(frame_time, times[index], rel_tol=1e-9, abs_tol=1e-9):
+            raise ResultContractError(f"{path}.per_frame time differs from sample_times_seconds")
+        bounded_features = {
+            "frame_difference": 1.0,
+            "color_histogram_distance": 1.0,
+            "brightness": 1.0,
+            "saturation": 1.0,
+            "contrast": 1.0,
+            "colorfulness": 2.0,
+        }
+        for name, maximum in bounded_features.items():
+            _number(
+                frame[name],
+                f"{path}.per_frame[{index}].{name}",
+                ResultContractError,
+                minimum=0.0,
+                maximum=maximum,
+            )
+        _validate_rgb(frame["mean_rgb"], f"{path}.per_frame[{index}].mean_rgb")
+        if not re.fullmatch(r"#[A-F0-9]{6}", _string(frame["mean_color_hex"], f"{path}.per_frame[{index}].mean_color_hex", ResultContractError)):
+            raise ResultContractError(f"{path}.per_frame[{index}].mean_color_hex is invalid")
+
+    color = _strict_fields(
+        analytics["color"],
+        {"method", "mean_rgb", "palette", "brightness", "saturation", "contrast", "colorfulness"},
+        f"{path}.color",
+        ResultContractError,
+    )
+    _string(color["method"], f"{path}.color.method", ResultContractError)
+    _validate_rgb(color["mean_rgb"], f"{path}.color.mean_rgb")
+    palette = color["palette"]
+    if not isinstance(palette, list) or not 1 <= len(palette) <= 8:
+        raise ResultContractError(f"{path}.color.palette must contain one to eight colors")
+    palette_fraction = 0.0
+    for index, raw_color in enumerate(palette):
+        item = _strict_fields(raw_color, {"rank", "hex", "rgb", "fraction"}, f"{path}.color.palette[{index}]", ResultContractError)
+        if _integer(item["rank"], f"{path}.color.palette[{index}].rank", ResultContractError, minimum=1) != index + 1:
+            raise ResultContractError(f"{path}.color.palette ranks must be consecutive")
+        if not re.fullmatch(
+            r"#[A-F0-9]{6}",
+            _string(
+                item["hex"],
+                f"{path}.color.palette[{index}].hex",
+                ResultContractError,
+            ),
+        ):
+            raise ResultContractError(
+                f"{path}.color.palette[{index}].hex is invalid"
+            )
+        _validate_rgb(item["rgb"], f"{path}.color.palette[{index}].rgb")
+        palette_fraction += _number(
+            item["fraction"],
+            f"{path}.color.palette[{index}].fraction",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+        )
+    if palette_fraction <= 0.0 or palette_fraction > 1.0 + 1e-8:
+        raise ResultContractError(
+            f"{path}.color.palette fractions must describe a non-empty subset"
+        )
+    for name in ("brightness", "saturation", "contrast", "colorfulness"):
+        distribution = _validate_distribution(color[name], f"{path}.color.{name}")
+        if distribution["count"] != frame_count:
+            raise ResultContractError(f"{path}.color.{name}.count differs from sampled frames")
+
+    scene = _strict_fields(analytics["scene_changes"], {"method", "threshold", "candidates"}, f"{path}.scene_changes", ResultContractError)
+    _string(scene["method"], f"{path}.scene_changes.method", ResultContractError)
+    _number(scene["threshold"], f"{path}.scene_changes.threshold", ResultContractError, minimum=0.0, nullable=True)
+    candidates = scene["candidates"]
+    if not isinstance(candidates, list):
+        raise ResultContractError(f"{path}.scene_changes.candidates must be an array")
+    for index, raw_candidate in enumerate(candidates):
+        candidate = _strict_fields(raw_candidate, {"from_sample_index", "to_sample_index", "time_seconds", "score", "frame_difference", "color_histogram_distance"}, f"{path}.scene_changes.candidates[{index}]", ResultContractError)
+        start = _integer(candidate["from_sample_index"], f"{path}.scene_changes.candidates[{index}].from_sample_index", ResultContractError, minimum=1)
+        finish = _integer(candidate["to_sample_index"], f"{path}.scene_changes.candidates[{index}].to_sample_index", ResultContractError, minimum=2)
+        if finish != start + 1 or finish > frame_count:
+            raise ResultContractError(f"{path}.scene_changes candidate indexes are inconsistent")
+        _number(
+            candidate["time_seconds"],
+            f"{path}.scene_changes.candidates[{index}].time_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        for name in ("score", "frame_difference", "color_histogram_distance"):
+            _number(
+                candidate[name],
+                f"{path}.scene_changes.candidates[{index}].{name}",
+                ResultContractError,
+                minimum=0.0,
+            )
+
+
+def _validate_whisper_model(value: object, path: str) -> dict:
+    model = _strict_fields(
+        value,
+        {
+            "status",
+            "reason",
+            "repository_resource_name",
+            "resource_uuid",
+            "resource_version",
+            "size",
+            "target_device",
+            "network_mode",
+            "artifacts",
+            "identity_sha256",
+        },
+        path,
+        ResultContractError,
+    )
+    status = _string(model["status"], f"{path}.status", ResultContractError)
+    if status not in {"VERIFIED", "NOT_CACHED", "IDENTITY_MISMATCH"}:
+        raise ResultContractError(f"{path}.status is unsupported")
+    reason = _string(
+        model["reason"], f"{path}.reason", ResultContractError, nonempty=False
+    )
+    for name in (
+        "repository_resource_name",
+        "resource_uuid",
+        "resource_version",
+        "size",
+        "target_device",
+        "network_mode",
+    ):
+        expected = WHISPER_MODEL_IDENTITY[name]
+        if model[name] != expected:
+            raise ResultContractError(f"{path}.{name} differs from the pinned model")
+    if status == "VERIFIED" and reason:
+        raise ResultContractError(f"{path}.reason must be empty when VERIFIED")
+    if status != "VERIFIED" and not reason:
+        raise ResultContractError(f"{path}.reason must explain an unverified model")
+
+    artifacts = model["artifacts"]
+    if not isinstance(artifacts, dict):
+        raise ResultContractError(f"{path}.artifacts must be an object")
+    if artifacts:
+        artifacts = _strict_fields(
+            artifacts, set(WHISPER_ARTIFACTS), f"{path}.artifacts", ResultContractError
+        )
+        for name, expected in WHISPER_ARTIFACTS.items():
+            artifact_path = f"{path}.artifacts.{name}"
+            artifact = _strict_fields(
+                artifacts[name],
+                {
+                    "content_element",
+                    "sha256",
+                    "size_bytes",
+                    "status",
+                    "actual_sha256",
+                    "actual_size_bytes",
+                },
+                artifact_path,
+                ResultContractError,
+            )
+            for field in ("content_element", "sha256", "size_bytes"):
+                if artifact[field] != expected[field]:
+                    raise ResultContractError(
+                        f"{artifact_path}.{field} differs from the pinned artifact"
+                    )
+            artifact_status = _string(
+                artifact["status"], f"{artifact_path}.status", ResultContractError
+            )
+            if artifact_status not in {"VERIFIED", "NOT_CACHED", "HASH_MISMATCH"}:
+                raise ResultContractError(f"{artifact_path}.status is unsupported")
+            actual_sha = artifact["actual_sha256"]
+            actual_size = artifact["actual_size_bytes"]
+            if actual_sha is not None:
+                _sha256(actual_sha, f"{artifact_path}.actual_sha256", ResultContractError)
+            if actual_size is not None:
+                _integer(
+                    actual_size,
+                    f"{artifact_path}.actual_size_bytes",
+                    ResultContractError,
+                    minimum=1,
+                )
+            if artifact_status == "VERIFIED" and (
+                actual_sha != expected["sha256"]
+                or actual_size != expected["size_bytes"]
+            ):
+                raise ResultContractError(
+                    f"{artifact_path} claims VERIFIED with a different identity"
+                )
+
+    identity = model["identity_sha256"]
+    if status == "VERIFIED":
+        if set(artifacts) != set(WHISPER_ARTIFACTS):
+            raise ResultContractError(
+                f"{path}.artifacts must include every pinned model component"
+            )
+        if identity != WHISPER_MODEL_IDENTITY["identity_sha256"]:
+            raise ResultContractError(f"{path}.identity_sha256 is not the pinned identity")
+    elif identity is not None:
+        raise ResultContractError(f"{path}.identity_sha256 must be null when unverified")
+    return model
+
+
+def _validate_whisper_inference(value: object, path: str) -> None:
+    inference = _strict_fields(
+        value,
+        {
+            "chunk_seconds",
+            "chunk_count",
+            "max_tokens_per_chunk",
+            "sampling",
+            "temperature",
+            "target_device",
+            "network_mode",
+        },
+        path,
+        ResultContractError,
+    )
+    if _number(
+        inference["chunk_seconds"],
+        f"{path}.chunk_seconds",
+        ResultContractError,
+        minimum=0.000001,
+    ) != 30.0:
+        raise ResultContractError(f"{path}.chunk_seconds must match the pinned method")
+    _integer(
+        inference["chunk_count"],
+        f"{path}.chunk_count",
+        ResultContractError,
+        minimum=1,
+    )
+    if _integer(
+        inference["max_tokens_per_chunk"],
+        f"{path}.max_tokens_per_chunk",
+        ResultContractError,
+        minimum=1,
+    ) != 224:
+        raise ResultContractError(
+            f"{path}.max_tokens_per_chunk must match the pinned method"
+        )
+    if inference["sampling"] != "greedy_argmax" or inference["temperature"] != 0.0:
+        raise ResultContractError(f"{path} must use deterministic greedy decoding")
+    if inference["target_device"] != "CPU" or inference["network_mode"] != "disabled":
+        raise ResultContractError(f"{path} must be local CPU inference with networking disabled")
+
+
+def _validate_transcript_measurement(
+    value: object,
+    duration: float,
+    capability: dict,
+    transcript_config: dict,
+) -> None:
+    path = "measurements.transcript"
+    transcript = _strict_fields(
+        value,
+        {"status", "reason", "method", "text", "segments", "statistics", "model", "sidecar", "inference"},
+        path,
+        ResultContractError,
+    )
+    status = _string(transcript["status"], f"{path}.status", ResultContractError)
+    if status not in {"AVAILABLE", "UNAVAILABLE"}:
+        raise ResultContractError(f"{path}.status is unsupported")
+    reason = _string(transcript["reason"], f"{path}.reason", ResultContractError, nonempty=False)
+    method = _string(transcript["method"], f"{path}.method", ResultContractError)
+    if method not in {
+        "wolfram_whisper_v1_tiny",
+        "sidecar",
+        "disabled",
+        "configuration",
+    }:
+        raise ResultContractError(f"{path}.method is unsupported")
+    text_value = _string(transcript["text"], f"{path}.text", ResultContractError, nonempty=False)
+    segments = transcript["segments"]
+    if not isinstance(segments, list):
+        raise ResultContractError(f"{path}.segments must be an array")
+    for index, raw_segment in enumerate(segments):
+        segment = _strict_fields(raw_segment, {"start_seconds", "end_seconds", "text"}, f"{path}.segments[{index}]", ResultContractError)
+        start = _number(segment["start_seconds"], f"{path}.segments[{index}].start_seconds", ResultContractError, minimum=0.0, maximum=duration)
+        end = _number(segment["end_seconds"], f"{path}.segments[{index}].end_seconds", ResultContractError, minimum=0.0, maximum=duration)
+        if end < start:
+            raise ResultContractError(f"{path}.segments[{index}] ends before it starts")
+        _string(segment["text"], f"{path}.segments[{index}].text", ResultContractError)
+    statistics = _strict_fields(
+        transcript["statistics"],
+        {"character_count", "word_count", "sentence_count", "unique_word_count", "lexical_diversity", "words_per_minute", "top_terms"},
+        f"{path}.statistics",
+        ResultContractError,
+    )
+    for name in ("character_count", "word_count", "sentence_count", "unique_word_count"):
+        _integer(statistics[name], f"{path}.statistics.{name}", ResultContractError, minimum=0)
+    if statistics["character_count"] != len(text_value):
+        raise ResultContractError(
+            f"{path}.statistics.character_count differs from transcript text"
+        )
+    if statistics["unique_word_count"] > statistics["word_count"]:
+        raise ResultContractError(
+            f"{path}.statistics.unique_word_count exceeds word_count"
+        )
+    _number(statistics["lexical_diversity"], f"{path}.statistics.lexical_diversity", ResultContractError, minimum=0.0, maximum=1.0, nullable=True)
+    _number(statistics["words_per_minute"], f"{path}.statistics.words_per_minute", ResultContractError, minimum=0.0, nullable=True)
+    terms = statistics["top_terms"]
+    if not isinstance(terms, list) or len(terms) > 15:
+        raise ResultContractError(f"{path}.statistics.top_terms must be a bounded array")
+    for index, raw_term in enumerate(terms):
+        term = _strict_fields(raw_term, {"term", "count"}, f"{path}.statistics.top_terms[{index}]", ResultContractError)
+        _string(term["term"], f"{path}.statistics.top_terms[{index}].term", ResultContractError)
+        _integer(term["count"], f"{path}.statistics.top_terms[{index}].count", ResultContractError, minimum=1)
+    capability_status = capability["status"]
+    if status == "AVAILABLE":
+        if capability_status != "USED" or reason or not text_value:
+            raise ResultContractError("Available transcript requires USED capability and non-empty text")
+        if method == "sidecar" and transcript["sidecar"] is None:
+            raise ResultContractError("Sidecar transcript must include sidecar provenance")
+        if method == "sidecar":
+            configured_sidecar = transcript_config["sidecar"]
+            if configured_sidecar is None:
+                raise ResultContractError(
+                    "Sidecar transcript requires a verified input sidecar"
+                )
+            sidecar = _strict_fields(
+                transcript["sidecar"],
+                {"format", "sha256", "size_bytes"},
+                f"{path}.sidecar",
+                ResultContractError,
+            )
+            if (
+                sidecar["format"] != configured_sidecar["format"]
+                or sidecar["sha256"] != configured_sidecar["sha256"]
+                or sidecar["size_bytes"] != configured_sidecar["size_bytes"]
+            ):
+                raise IntegrityError(
+                    "Transcript result sidecar identity differs from verified input"
+                )
+            if transcript["model"] is not None or transcript["inference"] is not None:
+                raise ResultContractError(
+                    "Sidecar transcript must not claim model inference provenance"
+                )
+        if method == "wolfram_whisper_v1_tiny" and (
+            transcript["model"] is None or transcript["inference"] is None
+        ):
+            raise ResultContractError(
+                "Whisper transcript must include model and inference provenance"
+            )
+        if method == "wolfram_whisper_v1_tiny":
+            model = _validate_whisper_model(
+                transcript["model"], f"{path}.model"
+            )
+            if model["status"] != "VERIFIED":
+                raise ResultContractError(
+                    "Available Whisper transcript requires a verified pinned model"
+                )
+            _validate_whisper_inference(
+                transcript["inference"], f"{path}.inference"
+            )
+            if transcript["sidecar"] is not None:
+                raise ResultContractError(
+                    "Whisper transcript must not claim sidecar provenance"
+                )
+        if method not in {"sidecar", "wolfram_whisper_v1_tiny"}:
+            raise ResultContractError(
+                "Available transcript uses an unavailable-only method"
+            )
+    else:
+        if capability_status == "USED" or not reason or text_value or segments:
+            raise ResultContractError("Unavailable transcript must be empty and explained")
+        if any(statistics[name] != 0 for name in (
+            "character_count", "word_count", "sentence_count", "unique_word_count"
+        )) or statistics["top_terms"]:
+            raise ResultContractError(
+                "Unavailable transcript statistics must be empty"
+            )
+        if transcript["model"] is not None:
+            _validate_whisper_model(transcript["model"], f"{path}.model")
+        if transcript["sidecar"] is not None or transcript["inference"] is not None:
+            raise ResultContractError(
+                "Unavailable transcript must not claim completed source or inference provenance"
+            )
+
+
+def _validate_measurements(value: object, capabilities: dict, analysis_input: dict) -> None:
     measurements = _strict_fields(
         value,
         {
@@ -867,6 +1830,9 @@ def _validate_measurements(value: object, capabilities: dict) -> None:
             "evidence_events",
             "tabular_summary",
             "video",
+            "video_analytics",
+            "audio_analytics",
+            "transcript",
         },
         "measurements",
         ResultContractError,
@@ -932,6 +1898,17 @@ def _validate_measurements(value: object, capabilities: dict) -> None:
         "measurements.silence_intervals_seconds",
         audio_duration if audio_duration is not None else duration,
     )
+    for audible_index, audible in enumerate(
+        measurements["audible_intervals_seconds"]
+    ):
+        for silence_index, silence in enumerate(
+            measurements["silence_intervals_seconds"]
+        ):
+            if audible[0] < silence[1] and silence[0] < audible[1]:
+                raise ResultContractError(
+                    "measurements audible and silence intervals overlap at "
+                    f"audible[{audible_index}] and silence[{silence_index}]"
+                )
     if nullable_audio and (
         measurements["audible_intervals_seconds"]
         or measurements["silence_intervals_seconds"]
@@ -993,7 +1970,12 @@ def _validate_measurements(value: object, capabilities: dict) -> None:
     )
     if event_count != len(event_types):
         raise ResultContractError("Evidence event count differs from unique event types")
-    if set(event_types) != {"SOURCE_DISCOVERED", "SOURCE_HASH_VERIFIED"}:
+    expected_event_types = {"SOURCE_DISCOVERED", "SOURCE_HASH_VERIFIED"}
+    if analysis_input["transcript"]["sidecar"] is not None:
+        expected_event_types.update(
+            {"TRANSCRIPT_SOURCE_DISCOVERED", "TRANSCRIPT_SOURCE_HASH_VERIFIED"}
+        )
+    if set(event_types) != expected_event_types:
         raise ResultContractError("Evidence event types differ from verified local evidence")
 
     tabular = _strict_fields(
@@ -1018,6 +2000,56 @@ def _validate_measurements(value: object, capabilities: dict) -> None:
     if set(column_names) != {"sequence", "event_type", "stage", "status", "artifact_count"}:
         raise ResultContractError("Tabular columns differ from local evidence fields")
     _validate_video_measurements(measurements["video"], duration)
+    _validate_video_analytics(
+        measurements["video_analytics"],
+        duration,
+        measurements["video"]["frame_count_sampled"],
+    )
+    _validate_audio_analytics(measurements["audio_analytics"], audio_available)
+    _validate_transcript_measurement(
+        measurements["transcript"],
+        duration,
+        capabilities["transcript_analysis"],
+        analysis_input["transcript"],
+    )
+
+
+def _validate_output_format(path: Path, name: str) -> None:
+    prefix = path.read_bytes()[:4096]
+    if name.endswith(".png"):
+        if len(prefix) < 24 or prefix[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR":
+            raise ResultContractError(f"output/{name} is not a PNG image")
+        width, height = struct.unpack(">II", prefix[16:24])
+        if width < 1 or height < 1:
+            raise ResultContractError(f"output/{name} has invalid PNG dimensions")
+        return
+    try:
+        text_prefix = prefix.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ResultContractError(f"output/{name} is not valid UTF-8 text") from exc
+    normalized = text_prefix.lstrip().casefold()
+    if name == "analysis-notebook.nb" and not text_prefix.lstrip().startswith("Notebook["):
+        raise ResultContractError("output/analysis-notebook.nb is not a Wolfram notebook expression")
+    if name.endswith(".svg") and not (
+        "<svg" in normalized and ("<?xml" in normalized or normalized.startswith("<svg"))
+    ):
+        raise ResultContractError(f"output/{name} is not an SVG document")
+    if name.endswith(".html") and not (
+        "<html" in normalized and ("<!doctype html" in normalized or "<head" in normalized)
+    ):
+        raise ResultContractError(f"output/{name} is not an HTML document")
+    if name.endswith(".md") and not text_prefix.lstrip().startswith("#"):
+        raise ResultContractError(f"output/{name} is not a Markdown report")
+
+
+def _invalidate_result_markers(root: Path) -> None:
+    for relative in ("output/result.json", "artefacts/repeatability.json"):
+        candidate = root / relative
+        if not candidate.exists() and not candidate.is_symlink():
+            continue
+        if candidate.is_dir() and not candidate.is_symlink():
+            raise ResultContractError(f"{relative} must not be a directory")
+        candidate.unlink()
 
 
 def _validate_outputs(root: Path, value: object) -> None:
@@ -1061,8 +2093,39 @@ def _validate_outputs(root: Path, value: object) -> None:
             raise IntegrityError(f"Output size differs for output/{path}")
         if sha256_file(output_path) != expected_sha:
             raise IntegrityError(f"Output SHA-256 differs for output/{path}")
+        _validate_output_format(output_path, path)
     if seen != set(EXPECTED_OUTPUT_MEDIA_TYPES):
         raise ResultContractError("outputs do not contain the exact required artifact set")
+
+    notebook_path = root / "output" / "analysis-notebook.nb"
+    notebook_bytes = notebook_path.read_bytes()
+    required_notebook_sections = (
+        b"Executive overview",
+        b"Video storyboard",
+        b"Color analysis",
+        b"Motion and temporal structure",
+        b"Sound intelligence",
+        b"Transcript and speech text",
+        b"Cross-modal timeline",
+        b"Provenance and evidence",
+        b"Output inventory",
+        b"Capabilities and methodology",
+        b"Re-run through the verified package",
+    )
+    missing_sections = [
+        section.decode("ascii")
+        for section in required_notebook_sections
+        if section not in notebook_bytes
+    ]
+    if missing_sections:
+        raise ResultContractError(
+            "analysis-notebook.nb is missing required analytical sections: "
+            + ", ".join(missing_sections)
+        )
+    if notebook_bytes.count(b"GraphicsBox[") < 5:
+        raise ResultContractError(
+            "analysis-notebook.nb must embed at least five analytical graphics"
+        )
 
 
 def validate_result(
@@ -1073,6 +2136,7 @@ def validate_result(
 ) -> dict:
     """Validate Mathematica's raw result and atomically publish canonical JSON."""
     root = _workspace_path(workspace)
+    _invalidate_result_markers(root)
     analysis_input = validate_analysis_input(root, input_path)
     unresolved_raw_path = (
         Path(raw_result_path)
@@ -1094,6 +2158,7 @@ def validate_result(
             "run_id",
             "processor",
             "source",
+            "transcript",
             "evidence",
             "parameters",
             "capabilities",
@@ -1104,7 +2169,16 @@ def validate_result(
         "result",
         ResultContractError,
     )
-    for field in ("schema_version", "analysis_id", "object_id", "run_id", "source", "evidence", "parameters"):
+    for field in (
+        "schema_version",
+        "analysis_id",
+        "object_id",
+        "run_id",
+        "source",
+        "transcript",
+        "evidence",
+        "parameters",
+    ):
         if result[field] != analysis_input[field]:
             raise IntegrityError(f"Result {field} differs from the verified analysis input")
 
@@ -1132,16 +2206,22 @@ def validate_result(
         raise IntegrityError("Processor package SHA-256 differs from current package sources")
     if processor["network_mode"] != "disabled":
         raise ResultContractError("processor.network_mode must be disabled")
+    _validate_runtime_manifest(root, processor, analysis_input)
 
     _validate_capabilities(result["capabilities"])
-    _validate_measurements(result["measurements"], result["capabilities"])
+    _validate_measurements(result["measurements"], result["capabilities"], analysis_input)
     provenance = _strict_fields(
         result["provenance_summary"],
         {"task_count", "artifact_count", "integrity_conflict_count", "evidence_sha256"},
         "provenance_summary",
         ResultContractError,
     )
-    if provenance["task_count"] != 2 or provenance["artifact_count"] != 1:
+    expected_task_count = 4 if analysis_input["transcript"]["sidecar"] is not None else 2
+    expected_artifact_count = 2 if analysis_input["transcript"]["sidecar"] is not None else 1
+    if (
+        provenance["task_count"] != expected_task_count
+        or provenance["artifact_count"] != expected_artifact_count
+    ):
         raise ResultContractError("Provenance counts differ from the local source evidence")
     if provenance["integrity_conflict_count"] != 0:
         raise IntegrityError("Mathematica reported a provenance integrity conflict")
@@ -1194,6 +2274,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--frame-seconds", type=float, default=0.04)
     prepare.add_argument("--hop-seconds", type=float, default=0.02)
     prepare.add_argument("--random-seed", type=int, default=20260916)
+    prepare.add_argument(
+        "--transcript-mode",
+        choices=sorted(TRANSCRIPT_MODES),
+        default="prefer_sidecar",
+    )
 
     validate = commands.add_parser("validate", help="Verify and canonicalize result.raw.json")
     validate.add_argument("--workspace", default="Local-prototype")
@@ -1215,6 +2300,7 @@ def main(argv: list[str] | None = None) -> int:
                     "hop_seconds": args.hop_seconds,
                     "random_seed": args.random_seed,
                 },
+                transcript_mode=args.transcript_mode,
             )
             status = "PREPARED"
         else:

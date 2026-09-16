@@ -137,7 +137,554 @@ htmlReport[input_Association, measurements_Association, provenance_Association, 
     "</body></html>"
 ];
 
-analysisNotebook[input_Association, measurements_Association, provenance_Association, packageLoader_String, inputPath_String] := Module[{rerunCode},
+notebookFiniteNumberQ[value_] := NumericQ[value] && FreeQ[value, Indeterminate | DirectedInfinity[_] | ComplexInfinity];
+
+notebookLookup[value_, key_, default_] := If[AssociationQ[value], Lookup[value, key, default], default];
+
+notebookNestedLookup[value_, keys_List, default_] := Fold[
+    Function[{current, key}, notebookLookup[current, key, default]],
+    value,
+    keys
+];
+
+notebookLabel[key_] := StringReplace[Capitalize[ToString[key]], "_" -> " "];
+
+notebookDisplayValue[Null | None | _Missing] := Style["Not available", Italic, GrayLevel[.45]];
+notebookDisplayValue[value_?notebookFiniteNumberQ] := NumberForm[N[value], {10, 4}];
+notebookDisplayValue[value_String] := Style[value, FontFamily -> "Consolas", FontSize -> 9];
+notebookDisplayValue[value_] := Style[ToString[Short[value, 4], InputForm], FontFamily -> "Consolas", FontSize -> 8];
+
+flattenNotebookAssociation[association_Association, prefix_String: ""] := Flatten[
+    KeyValueMap[
+        Function[{key, value},
+            With[{label = If[prefix === "", notebookLabel[key], prefix <> " / " <> notebookLabel[key]]},
+                If[AssociationQ[value], flattenNotebookAssociation[value, label], {{label, notebookDisplayValue[value]}}]
+            ]
+        ],
+        association
+    ],
+    1
+];
+flattenNotebookAssociation[_, _String: ""] := {};
+
+notebookCallout[text_String, tone_String: "info"] := Module[{background, border, foreground},
+    {background, border, foreground} = Switch[tone,
+        "good", {RGBColor[.92, .98, .94], RGBColor[.20, .58, .34], RGBColor[.08, .32, .16]},
+        "warn", {RGBColor[1., .97, .89], RGBColor[.84, .57, .12], RGBColor[.42, .26, .04]},
+        "absent", {RGBColor[.96, .96, .97], RGBColor[.55, .58, .63], RGBColor[.28, .30, .34]},
+        _, {RGBColor[.92, .96, 1.], RGBColor[.20, .49, .78], RGBColor[.08, .25, .43]}
+    ];
+    Framed[
+        Style[text, 10.5, foreground, LineSpacing -> {1.15, 2}],
+        Background -> background,
+        FrameStyle -> border,
+        FrameMargins -> {{14, 14}, {10, 10}},
+        ImageSize -> 720
+    ]
+];
+
+notebookTable[association_Association, emptyMessage_String: "No values were emitted for this section."] := Module[{rows},
+    rows = flattenNotebookAssociation[association];
+    If[rows === {},
+        notebookCallout[emptyMessage, "absent"],
+        Grid[
+            Prepend[rows, {Style["Metric", Bold, White], Style["Value", Bold, White]}],
+            Alignment -> {{Left, Left}, Center},
+            Background -> {None, {RGBColor[.10, .18, .28], {White, RGBColor[.96, .97, .985]}}},
+            Dividers -> All,
+            FrameStyle -> GrayLevel[.84],
+            ItemSize -> {{23, 50}, Automatic},
+            Spacings -> {1.1, .75}
+        ]
+    ]
+];
+
+notebookRecordsTable[records_List, emptyMessage_String] := Module[{associations, keys, rows},
+    associations = Select[records, AssociationQ];
+    If[associations === {}, Return[notebookCallout[emptyMessage, "absent"]]];
+    keys = DeleteDuplicates[Flatten[Keys /@ associations]];
+    rows = (notebookDisplayValue /@ Lookup[#, keys, Null]) & /@ associations;
+    Grid[
+        Prepend[rows, Style[notebookLabel[#], Bold, White] & /@ keys],
+        Alignment -> Left,
+        Background -> {None, {RGBColor[.10, .18, .28], {White, RGBColor[.96, .97, .985]}}},
+        Dividers -> All,
+        FrameStyle -> GrayLevel[.84],
+        Spacings -> {.8, .65}
+    ]
+];
+
+notebookMetricCard[label_String, value_, note_String: ""] := Framed[
+    Column[
+        DeleteCases[
+            {
+                Style[ToUpperCase[label], 8.5, Bold, GrayLevel[.38]],
+                Style[value, 16, Bold, RGBColor[.08, .22, .36]],
+                If[note === "", Nothing, Style[note, 8.5, GrayLevel[.42]]]
+            },
+            Nothing
+        ],
+        Spacings -> .25
+    ],
+    Background -> White,
+    FrameStyle -> RGBColor[.82, .87, .92],
+    FrameMargins -> {{10, 10}, {7, 7}},
+    ImageSize -> {205, Automatic}
+];
+
+notebookSeconds[value_] := If[
+    notebookFiniteNumberQ[value],
+    ToString[NumberForm[N[value], {Infinity, 2}]] <> " s",
+    "Not available"
+];
+
+notebookHumanBytes[value_] := Which[
+    ! NumericQ[value], "Not available",
+    value >= 2^30, ToString[NumberForm[N[value/2^30], {Infinity, 2}]] <> " GiB",
+    value >= 2^20, ToString[NumberForm[N[value/2^20], {Infinity, 2}]] <> " MiB",
+    value >= 2^10, ToString[NumberForm[N[value/2^10], {Infinity, 1}]] <> " KiB",
+    True, ToString[value] <> " bytes"
+];
+
+notebookShortHash[value_] := If[
+    StringQ[value] && StringLength[value] > 24,
+    StringTake[value, 12] <> "..." <> StringTake[value, -8],
+    value
+];
+
+notebookCleanIntervals[value_] := Select[
+    If[ListQ[value], value, {}],
+    ListQ[#] && Length[#] == 2 && AllTrue[#, notebookFiniteNumberQ] && Last[#] >= First[#] &
+];
+
+notebookIntervalDuration[intervals_List] := Total[(Last[#] - First[#]) & /@ intervals];
+
+notebookIntervalGraphic[audible_List, silence_List, duration_] := Module[{maximum},
+    maximum = If[notebookFiniteNumberQ[duration] && duration > 0, N[duration], 1.];
+    Graphics[
+        {
+            {RGBColor[.82, .84, .87], (Rectangle[{#[[1]], .05}, {#[[2]], .43}] &) /@ silence},
+            {RGBColor[.16, .58, .78], (Rectangle[{#[[1]], .57}, {#[[2]], .95}] &) /@ audible},
+            {GrayLevel[.25], Thickness[.001], Line[{{0., .5}, {maximum, .5}}]}
+        },
+        PlotRange -> {{0., maximum}, {0., 1.}},
+        Frame -> True,
+        FrameTicks -> {{{{.24, "Silence"}, {.76, "Audible"}}, None}, {Automatic, None}},
+        FrameLabel -> {{None, None}, {"Time (seconds)", None}},
+        ImagePadding -> {{62, 16}, {35, 8}},
+        ImageSize -> 720,
+        Background -> White
+    ]
+];
+
+notebookFrameRGB[image_Image] := Module[{pixels},
+    pixels = Flatten[ImageData[ColorConvert[image, "RGB"], "Real"], 1];
+    N[Mean[pixels]]
+];
+
+notebookFrameBrightness[image_Image] := N[Mean[Flatten[ImageData[ColorConvert[image, "Grayscale"], "Real"]]]];
+
+notebookMotionValues[frames_List] := Module[{arrays},
+    If[Length[frames] < 2, Return[{}]];
+    arrays = ImageData[ColorConvert[#, "Grayscale"], "Real"] & /@ frames;
+    MapThread[N[Mean[Abs[Flatten[#2 - #1]]]] &, {Most[arrays], Rest[arrays]}]
+];
+
+notebookSampleTimes[media_Association, frameCount_Integer, duration_] := Module[{analytics, times},
+    analytics = notebookLookup[media, "video_analytics", <||>];
+    times = notebookLookup[analytics, "sample_times_seconds", {}];
+    If[
+        ListQ[times] && Length[times] == frameCount && AllTrue[times, notebookFiniteNumberQ],
+        N[times],
+        If[frameCount <= 1, {0.}, N[Subdivide[0., duration, frameCount - 1]]]
+    ]
+];
+
+notebookStoryboard[frames_List, times_List] := Module[{tiles, columns},
+    If[frames === {}, Return[notebookCallout["No video frames were available for the storyboard.", "warn"]]];
+    tiles = MapThread[
+        Function[{frame, time},
+            Framed[
+                Column[
+                    {ImageResize[frame, 210], Style[notebookSeconds[time], 9, Bold, GrayLevel[.28]]},
+                    Alignment -> Center,
+                    Spacings -> .35
+                ],
+                Background -> White,
+                FrameStyle -> GrayLevel[.82],
+                FrameMargins -> 5
+            ]
+        ],
+        {frames, times}
+    ];
+    columns = Min[3, Length[tiles]];
+    Grid[
+        Partition[PadRight[tiles, Ceiling[Length[tiles]/columns] columns, ""], columns],
+        Alignment -> Top,
+        Spacings -> {.7, .8}
+    ]
+];
+
+notebookStoryboardPages[frames_List, times_List] := MapThread[
+    notebookStoryboard,
+    {
+        Partition[frames, UpTo[3]],
+        Partition[times, UpTo[3]]
+    }
+];
+
+notebookColorVisual[frames_List, times_List, videoSummary_Association, videoAnalytics_Association] := Module[
+    {rgbValues, meanRGB, colorAnalytics, palette, paletteColors, swatches, swatchRow, rgbPlot, brightnessValues, brightnessPlot},
+    rgbValues = If[frames === {}, {}, notebookFrameRGB /@ frames];
+    meanRGB = notebookLookup[videoSummary, "mean_rgb", <||>];
+    meanRGB = If[
+        AssociationQ[meanRGB],
+        Lookup[meanRGB, {"red", "green", "blue"}, {0., 0., 0.}],
+        If[rgbValues === {}, {0., 0., 0.}, Mean[rgbValues]]
+    ];
+    meanRGB = Clip[N[meanRGB], {0., 1.}];
+    colorAnalytics = notebookLookup[videoAnalytics, "color", <||>];
+    palette = notebookLookup[colorAnalytics, "palette", {}];
+    paletteColors = DeleteMissing[
+        Map[
+            Function[value,
+                Which[
+                    MatchQ[value, _RGBColor], Take[List @@ value, 3],
+                    AssociationQ[value] && AssociationQ[Lookup[value, "rgb", Null]], Lookup[Lookup[value, "rgb"], {"red", "green", "blue"}, Missing["NotAColor"]],
+                    AssociationQ[value] && ListQ[Lookup[value, "rgb", Null]], Take[N[Lookup[value, "rgb"]], UpTo[3]],
+                    ListQ[value] && Length[value] >= 3 && AllTrue[Take[value, 3], NumericQ], N[Take[value, 3]],
+                    True, Missing["NotAColor"]
+                ]
+            ],
+            If[ListQ[palette], palette, {}]
+        ]
+    ];
+    If[paletteColors === {} && rgbValues =!= {}, paletteColors = Take[rgbValues, UpTo[8]]];
+    swatches = (Graphics[{EdgeForm[GrayLevel[.70]], RGBColor @@ Clip[#, {0., 1.}], Rectangle[{0, 0}, {1, 1}]}, ImageSize -> {55, 38}] &) /@ paletteColors;
+    swatchRow = Grid[
+        {{
+            Column[{Style["Mean sampled color", 9, Bold, GrayLevel[.30]], Graphics[{EdgeForm[GrayLevel[.55]], RGBColor @@ meanRGB, Rectangle[{0, 0}, {1, 1}]}, ImageSize -> {145, 82}]}],
+            BarChart[meanRGB, ChartLabels -> Placed[{"R", "G", "B"}, Below], ChartStyle -> {RGBColor[.82, .18, .20], RGBColor[.15, .64, .32], RGBColor[.16, .40, .82]}, PlotRange -> {0, 1}, ImageSize -> {280, 145}],
+            Column[{Style["Sampled palette", 9, Bold, GrayLevel[.30]], If[swatches === {}, Style["Not available", Italic], Grid[Partition[PadRight[swatches, Ceiling[Length[swatches]/4] 4, ""], 4], Spacings -> .2]]}]
+        }},
+        Alignment -> Top,
+        Spacings -> 1.3
+    ];
+    rgbPlot = If[
+        rgbValues === {},
+        Nothing,
+        ListLinePlot[
+            Table[Transpose[{times, rgbValues[[All, index]]}], {index, 3}],
+            PlotStyle -> {RGBColor[.82, .18, .20], RGBColor[.15, .64, .32], RGBColor[.16, .40, .82]},
+            PlotLegends -> Placed[{"Red", "Green", "Blue"}, Below],
+            Frame -> True,
+            Axes -> False,
+            FrameLabel -> {"Time (seconds)", "Mean channel intensity"},
+            PlotRange -> {0, 1},
+            ImageSize -> 720,
+            GridLines -> Automatic
+        ]
+    ];
+    brightnessValues = If[frames === {}, {}, notebookFrameBrightness /@ frames];
+    brightnessPlot = If[
+        brightnessValues === {},
+        Nothing,
+        ListLinePlot[
+            Transpose[{times, brightnessValues}],
+            PlotStyle -> Directive[RGBColor[.94, .56, .15], Thick],
+            Filling -> Axis,
+            FillingStyle -> Directive[RGBColor[1., .78, .35], Opacity[.25]],
+            Frame -> True,
+            Axes -> False,
+            FrameLabel -> {"Time (seconds)", "Perceived brightness"},
+            PlotRange -> {0, 1},
+            ImageSize -> 720,
+            GridLines -> Automatic
+        ]
+    ];
+    Column[DeleteCases[{swatchRow, rgbPlot, brightnessPlot}, Nothing], Spacings -> 1.2]
+];
+
+notebookCandidateTime[candidate_] := Which[
+    notebookFiniteNumberQ[candidate], N[candidate],
+    AssociationQ[candidate], SelectFirst[Lookup[candidate, {"time_seconds", "timestamp_seconds", "time"}, Null], notebookFiniteNumberQ, Missing["NoTime"]],
+    True, Missing["NoTime"]
+];
+
+notebookMotionVisual[frames_List, times_List, sceneCandidates_List] := Module[{motion, motionTimes, sceneTimes},
+    motion = notebookMotionValues[frames];
+    motionTimes = If[Length[times] >= 2, Rest[times], {}];
+    sceneTimes = DeleteMissing[notebookCandidateTime /@ sceneCandidates];
+    If[
+        motion === {},
+        notebookCallout["At least two sampled frames are required for temporal motion analysis.", "warn"],
+        Rasterize[
+            ListLinePlot[
+                Transpose[{motionTimes, motion}],
+                PlotStyle -> Directive[RGBColor[.47, .25, .72], Thick],
+                Filling -> Axis,
+                FillingStyle -> Directive[RGBColor[.58, .40, .78], Opacity[.22]],
+                Epilog -> (({RGBColor[.88, .30, .20], Dashed, Thick, Line[{{#, 0}, {#, Max[Append[motion, .001]]}}]} &) /@ sceneTimes),
+                Frame -> True,
+                FrameStyle -> GrayLevel[.16],
+                Axes -> False,
+                Background -> White,
+                FrameLabel -> {"Time (seconds)", "Mean frame difference"},
+                PlotRange -> All,
+                ImageSize -> 720,
+                GridLines -> Automatic
+            ],
+            "Image",
+            Background -> White,
+            ImageResolution -> 144
+        ]
+    ]
+];
+
+notebookTranscriptData[media_Association, measurements_Association] := Module[{candidate},
+    candidate = notebookLookup[media, "transcript", notebookLookup[measurements, "transcript", <||>]];
+    If[AssociationQ[candidate], candidate, <||>]
+];
+
+notebookTranscriptSegments[transcript_Association] := Module[{segments},
+    segments = notebookLookup[transcript, "segments", {}];
+    If[ListQ[segments], Select[segments, AssociationQ], {}]
+];
+
+notebookSegmentBounds[segment_Association] := Module[{start, finish},
+    start = SelectFirst[Lookup[segment, {"start_seconds", "start", "begin_seconds"}, Null], notebookFiniteNumberQ, Missing["NoStart"]];
+    finish = SelectFirst[Lookup[segment, {"end_seconds", "end", "finish_seconds"}, Null], notebookFiniteNumberQ, Missing["NoEnd"]];
+    If[notebookFiniteNumberQ[start] && notebookFiniteNumberQ[finish] && finish >= start, {N[start], N[finish]}, Missing["NoBounds"]]
+];
+
+notebookSeriesPairs[series_] := Module[{normal},
+    normal = Quiet[Check[Normal[series], {}]];
+    Select[
+        If[ListQ[normal], normal, {}],
+        ListQ[#] && Length[#] == 2 && notebookFiniteNumberQ[First[#]] && notebookFiniteNumberQ[Last[#]] &
+    ]
+];
+
+notebookAudioAnalyticsSummary[analytics_Association] := <|
+    "analysis_status" -> notebookLookup[analytics, "status", Null],
+    "method" -> notebookLookup[analytics, "method", Null],
+    "crest_factor" -> notebookNestedLookup[analytics, {"dynamics", "crest_factor"}, Null],
+    "crest_factor_db" -> notebookNestedLookup[analytics, {"dynamics", "crest_factor_db"}, Null],
+    "local_dynamic_range_db" -> notebookNestedLookup[analytics, {"dynamics", "local_dynamic_range_db"}, Null],
+    "rms_dbfs_mean" -> notebookNestedLookup[analytics, {"dynamics", "rms_dbfs", "mean"}, Null],
+    "rms_dbfs_q05" -> notebookNestedLookup[analytics, {"dynamics", "rms_dbfs", "q05"}, Null],
+    "rms_dbfs_q95" -> notebookNestedLookup[analytics, {"dynamics", "rms_dbfs", "q95"}, Null],
+    "local_loudness_mean" -> notebookNestedLookup[analytics, {"dynamics", "local_loudness", "mean"}, Null],
+    "local_loudness_q05" -> notebookNestedLookup[analytics, {"dynamics", "local_loudness", "q05"}, Null],
+    "local_loudness_q95" -> notebookNestedLookup[analytics, {"dynamics", "local_loudness", "q95"}, Null],
+    "spectral_centroid_mean_hz" -> notebookNestedLookup[analytics, {"frequency", "spectral_centroid_hz", "mean"}, Null],
+    "spectral_centroid_q95_hz" -> notebookNestedLookup[analytics, {"frequency", "spectral_centroid_hz", "q95"}, Null],
+    "spectral_spread_mean_hz" -> notebookNestedLookup[analytics, {"frequency", "spectral_spread_hz", "mean"}, Null],
+    "zero_crossing_rate_mean" -> notebookNestedLookup[analytics, {"frequency", "zero_crossing_rate", "mean"}, Null],
+    "nyquist_hz" -> notebookNestedLookup[analytics, {"frequency", "nyquist_frequency_hz"}, Null],
+    "pitch_status" -> notebookNestedLookup[analytics, {"pitch", "status"}, Null],
+    "pitch_method" -> notebookNestedLookup[analytics, {"pitch", "method"}, Null],
+    "pitch_coverage" -> notebookNestedLookup[analytics, {"pitch", "coverage_fraction"}, Null],
+    "pitch_mean_hz" -> notebookNestedLookup[analytics, {"pitch", "fundamental_frequency_hz", "mean"}, Null],
+    "pitch_median_hz" -> notebookNestedLookup[analytics, {"pitch", "fundamental_frequency_hz", "median"}, Null]
+|>;
+
+notebookAudioDiagnosticPlots[audioAnalysis_Association] := Module[{specifications, plots},
+    specifications = {
+        {"peak_series", "Local peak amplitude", "Amplitude", RGBColor[.84, .30, .24]},
+        {"loudness_series", "Local loudness", "dB", RGBColor[.16, .60, .36]},
+        {"spectral_spread_series", "Spectral spread", "Hz", RGBColor[.22, .48, .76]},
+        {"zero_crossing_rate_series", "Zero-crossing rate", "Rate", RGBColor[.55, .34, .72]},
+        {"pitch_series", "Fundamental-frequency candidates", "Hz", RGBColor[.90, .55, .12]}
+    };
+    plots = DeleteCases[
+        Map[
+            Function[specification,
+                With[{series = notebookLookup[audioAnalysis, specification[[1]], None]},
+                    If[
+                        notebookSeriesPairs[series] === {},
+                        Nothing,
+                        ListLinePlot[
+                            series,
+                            PlotLabel -> Style[specification[[2]], 9, Bold, GrayLevel[.12]],
+                            PlotStyle -> Directive[specification[[4]], Thick],
+                            Frame -> True,
+                            FrameStyle -> GrayLevel[.18],
+                            FrameTicksStyle -> GrayLevel[.22],
+                            LabelStyle -> Directive[GrayLevel[.15], 8],
+                            Axes -> False,
+                            Background -> White,
+                            FrameLabel -> {"Seconds", specification[[3]]},
+                            PlotRange -> All,
+                            ImageSize -> {315, 150},
+                            GridLines -> Automatic
+                        ]
+                    ]
+                ]
+            ],
+            specifications
+        ],
+        Nothing
+    ];
+    If[
+        plots === {},
+        notebookCallout["No extended audio time-series plots were emitted by this engine run.", "absent"],
+        Rasterize[
+            Grid[
+                Partition[
+                    PadRight[plots, Ceiling[Length[plots]/2] 2, Graphics[{}, PlotRange -> {{0, 1}, {0, 1}}, Background -> White, ImageSize -> {315, 150}]],
+                    2
+                ],
+                Alignment -> Top,
+                Spacings -> {.6, .8}
+            ],
+            "Image",
+            Background -> White,
+            ImageResolution -> 144
+        ]
+    ]
+];
+
+notebookAudioOverviewPanel[audioAnalysis_Association] := Module[{audio, rms, centroid, panel},
+    If[
+        ! TrueQ[notebookLookup[audioAnalysis, "available", False]],
+        Return[notebookCallout["No decodable audio track was found, so waveform and spectral diagnostics are unavailable.", "absent"]]
+    ];
+    audio = notebookLookup[audioAnalysis, "audio", None];
+    rms = notebookLookup[audioAnalysis, "rms_series", None];
+    centroid = notebookLookup[audioAnalysis, "centroid_series", None];
+    panel = Grid[
+        {
+            {
+                AudioPlot[audio, PlotLabel -> Style["Waveform", 9, Bold, GrayLevel[.12]], PlotLayout -> "Averaged", AxesStyle -> GrayLevel[.18], TicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], ImageSize -> {315, 150}],
+                ListLinePlot[rms, PlotLabel -> Style["Local RMS amplitude", 9, Bold, GrayLevel[.12]], Frame -> True, FrameStyle -> GrayLevel[.18], FrameTicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], Axes -> False, FrameLabel -> {"Seconds", "RMS"}, PlotRange -> All, ImageSize -> {315, 150}]
+            },
+            {
+                ListLinePlot[centroid, PlotLabel -> Style["Spectral centroid", 9, Bold, GrayLevel[.12]], Frame -> True, FrameStyle -> GrayLevel[.18], FrameTicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], Axes -> False, FrameLabel -> {"Seconds", "Hz"}, PlotRange -> All, ImageSize -> {315, 150}],
+                Spectrogram[audio, PlotLabel -> Style["Spectrogram", 9, Bold, GrayLevel[.12]], AxesStyle -> GrayLevel[.18], TicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], ImageSize -> {315, 150}]
+            }
+        },
+        Alignment -> Top,
+        Spacings -> {.55, .65}
+    ];
+    Rasterize[panel, "Image", Background -> White, ImageResolution -> 144]
+];
+
+notebookNormalizedLine[pairs_List, laneBottom_] := Module[{values, minimum, maximum, normalized},
+    If[pairs === {}, Return[{}]];
+    values = N[pairs[[All, 2]]];
+    minimum = Min[values];
+    maximum = Max[values];
+    normalized = If[maximum > minimum, (values - minimum)/(maximum - minimum), ConstantArray[.5, Length[values]]];
+    Line[Transpose[{N[pairs[[All, 1]]], laneBottom + .10 + .62 normalized}]]
+];
+
+notebookArtifactInventory[outputDirectory_String] := Module[{specifications},
+    specifications = {
+        {"video-contact-sheet.png", "image/png", "Uniform frame storyboard"},
+        {"video-summary.png", "image/png", "Wolfram VideoSummaryPlot"},
+        {"audio-overview.png", "image/png", "Waveform and spectral diagnostics"},
+        {"audio-overview.svg", "image/svg+xml", "Portable vector audio diagnostics"},
+        {"report.md", "text/markdown", "Portable machine-readable review report"},
+        {"report.html", "text/html", "Browser review report"},
+        {"analysis-notebook.nb", "application/vnd.wolfram.mathematica", "This interactive review notebook"}
+    };
+    Map[
+        Function[specification,
+            Module[{path = FileNameJoin[{outputDirectory, specification[[1]]}], exists},
+                exists = FileExistsQ[path] && specification[[1]] =!= "analysis-notebook.nb";
+                <|
+                    "artifact" -> specification[[1]],
+                    "media_type" -> specification[[2]],
+                    "role" -> specification[[3]],
+                    "status" -> If[exists, "EXPORTED", If[specification[[1]] === "analysis-notebook.nb", "THIS DOCUMENT", "PENDING"]],
+                    "size_bytes" -> If[exists, FileByteCount[path], Null],
+                    "sha256" -> If[exists, notebookShortHash[fileSHA256[path]], "Recorded after notebook export"]
+                |>
+            ]
+        ],
+        specifications
+    ]
+];
+
+notebookCrossModalGraphic[duration_, audible_List, silence_List, brightnessPairs_List, rmsPairs_List, loudnessPairs_List, motionPairs_List, transcriptSegments_List, sceneCandidates_List] := Module[
+    {maximum, brightnessLine, rmsLine, loudnessLine, motionLine, transcriptBounds, sceneTimes},
+    maximum = If[notebookFiniteNumberQ[duration] && duration > 0, N[duration], 1.];
+    brightnessLine = notebookNormalizedLine[brightnessPairs, 2.];
+    rmsLine = notebookNormalizedLine[rmsPairs, 3.];
+    loudnessLine = notebookNormalizedLine[loudnessPairs, 4.];
+    motionLine = notebookNormalizedLine[motionPairs, 5.];
+    transcriptBounds = DeleteMissing[notebookSegmentBounds /@ transcriptSegments];
+    sceneTimes = DeleteMissing[notebookCandidateTime /@ sceneCandidates];
+    Graphics[
+        {
+            {RGBColor[.84, .85, .87], (Rectangle[{#[[1]], .05}, {#[[2]], .70}] &) /@ silence},
+            {RGBColor[.16, .58, .78], (Rectangle[{#[[1]], 1.05}, {#[[2]], 1.70}] &) /@ audible},
+            {Directive[RGBColor[.94, .56, .15], Thick], brightnessLine},
+            {Directive[RGBColor[.12, .55, .72], Thick], rmsLine},
+            {Directive[RGBColor[.15, .64, .32], Thick], loudnessLine},
+            {Directive[RGBColor[.47, .25, .72], Thick], motionLine},
+            {RGBColor[.20, .65, .42], Opacity[.60], (Rectangle[{#[[1]], 6.05}, {#[[2]], 6.70}] &) /@ transcriptBounds},
+            {Directive[RGBColor[.88, .30, .20], Dashed, Thick], (Line[{{#, 0.}, {#, 6.8}}] &) /@ sceneTimes}
+        },
+        PlotRange -> {{0., maximum}, {0., 6.85}},
+        Frame -> True,
+        FrameTicks -> {{{{.38, "Silence"}, {1.38, "Audible"}, {2.40, "Brightness"}, {3.40, "RMS level"}, {4.40, "Loudness"}, {5.40, "Motion"}, {6.38, "Transcript"}}, None}, {Automatic, None}},
+        FrameLabel -> {{None, None}, {"Shared media time (seconds)", None}},
+        ImagePadding -> {{78, 16}, {36, 8}},
+        ImageSize -> 720,
+        Background -> White
+    ]
+];
+
+notebookCapabilityTable[capabilities_Association] := Module[{rows},
+    rows = KeyValueMap[
+        Function[{name, detail},
+            With[{status = notebookLookup[detail, "status", "UNKNOWN"]},
+                {
+                    notebookLabel[name],
+                    Style[status, Bold, Switch[status, "USED", RGBColor[.12, .53, .28], "UNAVAILABLE", RGBColor[.70, .39, .08], _, GrayLevel[.35]]],
+                    notebookLookup[detail, "reason", ""]
+                }
+            ]
+        ],
+        capabilities
+    ];
+    Grid[
+        Prepend[rows, Style[#, Bold, White] & /@ {"Capability", "Status", "Reason / scope"}],
+        Alignment -> Left,
+        Background -> {None, {RGBColor[.10, .18, .28], {White, RGBColor[.96, .97, .985]}}},
+        Dividers -> All,
+        FrameStyle -> GrayLevel[.84],
+        ItemSize -> {{20, 12, 45}, Automatic},
+        Spacings -> {.8, .7}
+    ]
+];
+
+notebookStyleDefinitions[] := Notebook[
+    {
+        Cell[StyleData[StyleDefinitions -> "Default.nb"]],
+        Cell[StyleData["Notebook"], FontFamily -> "Arial", FontSize -> 10, Background -> RGBColor[.985, .988, .992]],
+        Cell[StyleData["Title"], FontFamily -> "Arial", FontSize -> 29, FontWeight -> "Bold", FontColor -> RGBColor[.06, .16, .27], CellMargins -> {{42, 30}, {28, 8}}],
+        Cell[StyleData["Subtitle"], FontFamily -> "Arial", FontSize -> 12, FontColor -> GrayLevel[.36], CellMargins -> {{44, 34}, {0, 20}}],
+        Cell[StyleData["Section"], FontFamily -> "Arial", FontSize -> 19, FontWeight -> "Bold", FontColor -> RGBColor[.08, .30, .46], CellFrame -> {{0, 0}, {0, 1}}, CellFrameColor -> RGBColor[.30, .64, .78], CellMargins -> {{42, 34}, {28, 10}}, CellFrameMargins -> {{0, 0}, {0, 7}}],
+        Cell[StyleData["MajorSection", StyleDefinitions -> StyleData["Section"]], PageBreakAbove -> True],
+        Cell[StyleData["Subsection"], FontFamily -> "Arial", FontSize -> 14, FontWeight -> "Bold", FontColor -> RGBColor[.18, .25, .34], CellMargins -> {{44, 34}, {18, 7}}],
+        Cell[StyleData["Text"], FontFamily -> "Arial", FontSize -> 10.5, FontColor -> GrayLevel[.20], LineSpacing -> {1.15, 2}, CellMargins -> {{44, 34}, {5, 8}}],
+        Cell[StyleData["Item"], FontFamily -> "Arial", FontSize -> 10, CellMargins -> {{66, 34}, {3, 3}}],
+        Cell[StyleData["Output"], CellMargins -> {{44, 34}, {7, 12}}, Background -> White, CellFrame -> True, CellFrameColor -> RGBColor[.89, .91, .94], CellFrameMargins -> 12, ShowCellLabel -> False],
+        Cell[StyleData["Input"], FontFamily -> "Consolas", FontSize -> 9.5, CellMargins -> {{44, 34}, {8, 16}}, Background -> RGBColor[.965, .972, .98], CellFrame -> True, CellFrameColor -> RGBColor[.78, .83, .89]]
+    }
+];
+
+analysisNotebook[input_Association, media_Association, measurements_Association, provenance_Association, capabilities_Association, visuals_Association, outputDirectory_String, packageLoader_String, inputPath_String] := Module[
+    {rerunCode, source, videoSummary, videoAnalytics, frames, duration, times, rgbMean,
+     audioAnalysis, audioSummary, audioAvailable, audible, silence, audibleShare,
+     sceneChanges, sceneCandidates, transcript, transcriptSegments, transcriptStatus,
+     transcriptContent, motion, motionTimes, brightnessPairs, rmsPairs, loudnessPairs, motionPairs,
+     sourceRuntime, overviewCards, storyboardPages, colorDetails,
+     motionDetails, audioAnalytics, audioAnalyticsSummary, provenanceDetails, eventSummary, parameters,
+     methodologyItems, artifactInventory, crossModal, transcriptNotice, transcriptTextBlock, cells},
     rerunCode = StringRiffle[
         {
             "package = " <> ToString[packageLoader, InputForm] <> ";",
@@ -147,20 +694,240 @@ analysisNotebook[input_Association, measurements_Association, provenance_Associa
         },
         "\n"
     ];
-    Notebook[
-        {
-            Cell["Babelapha local Mathematica media analysis", "Title"],
-            Cell["A portable review notebook generated by the same headless package used by the CLI.", "Text"],
-            Cell["Identity", "Section"],
-            Cell[BoxData[ToBoxes[Dataset[KeyTake[input, {"analysis_id", "object_id", "run_id", "source", "parameters"}]]]], "Output"],
-            Cell["Measurements", "Section"],
-            Cell[BoxData[ToBoxes[Dataset[measurements]]], "Output"],
-            Cell["Provenance", "Section"],
-            Cell[BoxData[ToBoxes[Dataset[provenance]]], "Output"],
-            Cell["Re-run through the shared package", "Section"],
+    source = notebookLookup[input, "source", <||>];
+    videoSummary = notebookLookup[measurements, "video", notebookLookup[media, "video_summary", <||>]];
+    videoAnalytics = notebookLookup[media, "video_analytics", <||>];
+    frames = notebookLookup[media, "frames", {}];
+    If[! ListQ[frames], frames = {}];
+    duration = notebookLookup[measurements, "duration_seconds", notebookLookup[media, "duration_seconds", Null]];
+    times = notebookSampleTimes[media, Length[frames], duration];
+    storyboardPages = notebookStoryboardPages[frames, times];
+    rgbMean = notebookLookup[videoSummary, "mean_rgb", <||>];
+    audioAnalysis = notebookLookup[media, "audio_analysis", <||>];
+    audioSummary = notebookLookup[audioAnalysis, "summary", <||>];
+    audioAvailable = TrueQ[notebookLookup[audioAnalysis, "available", False]];
+    audible = notebookCleanIntervals[notebookLookup[audioSummary, "audible_intervals_seconds", {}]];
+    silence = notebookCleanIntervals[notebookLookup[audioSummary, "silence_intervals_seconds", {}]];
+    audibleShare = If[
+        notebookFiniteNumberQ[duration] && duration > 0,
+        Clip[notebookIntervalDuration[audible]/duration, {0., 1.}],
+        Null
+    ];
+    sceneChanges = notebookLookup[videoAnalytics, "scene_changes", <||>];
+    sceneCandidates = notebookLookup[sceneChanges, "candidates", {}];
+    If[! ListQ[sceneCandidates], sceneCandidates = {}];
+    transcript = notebookTranscriptData[media, measurements];
+    transcriptSegments = notebookTranscriptSegments[transcript];
+    transcriptStatus = If[
+        transcriptSegments =!= {},
+        "AVAILABLE",
+        ToUpperCase[ToString[notebookLookup[transcript, "status", "NOT PRODUCED"]]]
+    ];
+    transcriptContent = notebookLookup[transcript, "text", ""];
+    motion = notebookMotionValues[frames];
+    motionTimes = If[Length[times] >= 2, Rest[times], {}];
+    sourceRuntime = <|
+        "analysis_id" -> notebookLookup[input, "analysis_id", Null],
+        "object_id" -> notebookLookup[input, "object_id", Null],
+        "run_id" -> notebookLookup[input, "run_id", Null],
+        "source_path" -> notebookLookup[source, "path", Null],
+        "source_size" -> notebookHumanBytes[notebookLookup[source, "size_bytes", Null]],
+        "source_sha256" -> notebookShortHash[notebookLookup[source, "sha256", Null]],
+        "wolfram_version" -> $Version,
+        "system_id" -> $SystemID,
+        "package_sha256" -> notebookShortHash[notebookLookup[input, "package_sha256", Null]],
+        "network_mode" -> "disabled"
+    |>;
+    overviewCards = {
+        notebookMetricCard["Duration", notebookSeconds[duration], "Video timeline"],
+        notebookMetricCard["Sampled frames", ToString[Length[frames]], ToString[notebookLookup[videoSummary, "frame_dimensions", "?"]] <> " pixels"],
+        notebookMetricCard["Audio", If[audioAvailable, "Available", "Unavailable"], If[audioAvailable, ToString[notebookLookup[audioSummary, "channel_count", "?"]] <> " channel(s)", "No decodable track"]],
+        notebookMetricCard[
+            "Loudness",
+            If[notebookFiniteNumberQ[notebookLookup[audioSummary, "integrated_loudness_lufs", Null]], ToString[NumberForm[notebookLookup[audioSummary, "integrated_loudness_lufs", Null], {Infinity, 2}]] <> " LUFS", "Not available"],
+            "Integrated EBU"
+        ],
+        notebookMetricCard["Audible share", If[notebookFiniteNumberQ[audibleShare], ToString[NumberForm[100. audibleShare, {Infinity, 1}]] <> "%", "Not available"], ToString[Length[audible]] <> " interval(s)"],
+        notebookMetricCard["Transcript", transcriptStatus, If[transcriptSegments === {}, "Sidecar-ready; no invented text", ToString[Length[transcriptSegments]] <> " segment(s)"]]
+    };
+    colorDetails = Join[
+        <|"mean_rgb" -> rgbMean, "brightness" -> notebookLookup[videoSummary, "brightness", Null]|>,
+        If[
+            AssociationQ[notebookLookup[videoAnalytics, "color", <||>]],
+            KeyDrop[notebookLookup[videoAnalytics, "color", <||>], {"palette", "mean_rgb", "per_frame"}],
+            <||>
+        ]
+    ];
+    motionDetails = Join[
+        <|"motion" -> notebookLookup[videoSummary, "motion", Null]|>,
+        If[AssociationQ[sceneChanges], KeyDrop[sceneChanges, {"candidates"}], <||>]
+    ];
+    audioAnalytics = notebookLookup[audioAnalysis, "analytics", <||>];
+    audioAnalyticsSummary = If[AssociationQ[audioAnalytics], notebookAudioAnalyticsSummary[audioAnalytics], <||>];
+    brightnessPairs = If[frames === {}, {}, Transpose[{times, notebookFrameBrightness /@ frames}]];
+    rmsPairs = notebookSeriesPairs[notebookLookup[audioAnalysis, "rms_series", None]];
+    loudnessPairs = notebookSeriesPairs[
+        notebookLookup[
+            audioAnalysis,
+            "loudness_series",
+            notebookNestedLookup[audioAnalysis, {"analytics", "dynamics", "loudness_series"}, None]
+        ]
+    ];
+    motionPairs = If[motion === {} || motionTimes === {}, {}, Transpose[{motionTimes, motion}]];
+    provenanceDetails = Join[
+        provenance,
+        <|
+            "evidence_path" -> notebookNestedLookup[input, {"evidence", "path"}, Null],
+            "evidence_input_sha256" -> notebookShortHash[notebookNestedLookup[input, {"evidence", "sha256"}, Null]]
+        |>
+    ];
+    eventSummary = notebookLookup[measurements, "evidence_events", <||>];
+    parameters = notebookLookup[input, "parameters", <||>];
+    methodologyItems = {
+        "Video is decoded locally by Wolfram Language; uniformly sampled frames feed storyboard, RGB, brightness, and frame-difference views.",
+        "Color values are normalized RGB measurements. Motion is the mean absolute grayscale difference between adjacent sampled frames; it is a screening signal, not optical flow.",
+        "Sound analysis uses AudioLocalMeasurements and AudioIntervals with the configured frame, hop, and silence-threshold parameters; the overview embeds waveform, RMS, spectral centroid, and spectrogram views.",
+        "Transcript content is shown only when supplied by a verified analysis or timestamped sidecar. Missing speech text is reported explicitly and is never synthesized.",
+        "The run executes with Wolfram internet access disabled. Source, evidence, package, and emitted artifacts are bound by SHA-256 at the Python trust boundary."
+    };
+    artifactInventory = notebookArtifactInventory[outputDirectory];
+    crossModal = notebookCrossModalGraphic[duration, audible, silence, brightnessPairs, rmsPairs, loudnessPairs, motionPairs, transcriptSegments, sceneCandidates];
+    transcriptNotice = If[
+        transcriptSegments === {} && (! StringQ[transcriptContent] || StringLength[StringTrim[transcriptContent]] == 0),
+        notebookCallout["Transcript status: NOT PRODUCED. This local run does not invent speech text. A verified timestamped sidecar can populate this section and the shared timeline in a future run.", "absent"],
+        notebookCallout["Transcript status: " <> transcriptStatus <> ". The content below came from the run payload; it was not inferred by the notebook exporter.", "good"]
+    ];
+    transcriptTextBlock = If[
+        StringQ[transcriptContent] && StringLength[StringTrim[transcriptContent]] > 0,
+        Framed[Style[transcriptContent, 10.5, LineSpacing -> {1.2, 2}], Background -> White, FrameStyle -> GrayLevel[.84], FrameMargins -> 14, ImageSize -> 720],
+        notebookCallout["No transcript body is attached.", "absent"]
+    ];
+    cells = {
+        Cell["Babelapha media intelligence notebook", "Title"],
+        Cell["A local, inspectable Mathematica analysis surface — generated from the same package used by the headless runner.", "Subtitle"],
+
+        Cell[CellGroupData[{
+            Cell["Executive overview", "Section"],
+            Cell["A concise readout of what this run could verify. Every detailed section below remains tied to the source and evidence hashes.", "Text"],
+            Cell[BoxData[ToBoxes[Grid[{Take[overviewCards, 3]}, Alignment -> Top, Spacings -> {.55, 0}]]], "Output"],
+            Cell[BoxData[ToBoxes[Grid[{Drop[overviewCards, 3]}, Alignment -> Top, Spacings -> {.55, 0}]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Source and runtime", "Section"],
+            Cell["Identity, runtime, and integrity anchors for this exact local execution.", "Text"],
+            Cell[BoxData[ToBoxes[notebookTable[sourceRuntime]]], "Output"],
+            Cell["Analysis parameters", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookTable[parameters]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[Join[
+            {
+                Cell["Video storyboard", "MajorSection"],
+                Cell["Uniformly sampled frames provide a visual index across the complete source duration. Timestamps use the shared media clock. The storyboard is split into print-safe groups so every sampled frame remains visible.", "Text"]
+            },
+            Cell[BoxData[ToBoxes[#]], "Output"] & /@ storyboardPages,
+            {
+                Cell["Wolfram video summary", "Subsection"],
+                Cell[BoxData[ToBoxes[notebookLookup[visuals, "video_summary", notebookCallout["VideoSummaryPlot was unavailable for this run.", "warn"]]]], "Output"]
+            }
+        ], Open]],
+
+        Cell[CellGroupData[{
+            Cell["Color analysis", "MajorSection"],
+            Cell["Mean color, sampled palette, RGB trajectories, and perceived brightness reveal grading, fades, and large visual transitions.", "Text"],
+            Cell[BoxData[ToBoxes[notebookColorVisual[frames, times, videoSummary, videoAnalytics]]], "Output"],
+            Cell["Color measurements", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookTable[colorDetails]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Motion and temporal structure", "MajorSection"],
+            Cell["Frame-to-frame change is plotted on the common time axis. Dashed red markers identify emitted scene-change candidates when available.", "Text"],
+            Cell[BoxData[ToBoxes[notebookMotionVisual[frames, times, sceneCandidates]]], "Output"],
+            Cell[BoxData[ToBoxes[notebookTable[motionDetails]]], "Output"],
+            Cell["Scene-change candidates", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookRecordsTable[sceneCandidates, "No scene-change candidates were emitted for this source at the configured threshold."]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Sound intelligence", "MajorSection"],
+            Cell[
+                If[audioAvailable,
+                    "The embedded diagnostic panel combines waveform, local RMS amplitude, spectral centroid, and a spectrogram. Metrics and interval bands remain numeric and auditable.",
+                    "No decodable audio track was found. The notebook records that absence instead of displaying fabricated sound metrics."
+                ],
+                "Text"
+            ],
+            Cell[BoxData[ToBoxes[notebookLookup[visuals, "audio_overview", notebookCallout["No audio overview was produced.", "absent"]]]], "Output"],
+            Cell["Sound measurements", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookTable[KeyDrop[audioSummary, {"audible_intervals_seconds", "silence_intervals_seconds", "measurement_series"}]]]], "Output"],
+            Cell["Audible and silent intervals", "Subsection"],
+            Cell[BoxData[ToBoxes[If[audioAvailable, notebookIntervalGraphic[audible, silence, notebookLookup[audioSummary, "audio_duration_seconds", duration]], notebookCallout["Interval analysis is unavailable because this source has no decodable audio track.", "absent"]]]], "Output"],
+            Cell["Extended audio diagnostic curves", "Subsection"],
+            Cell[BoxData[ToBoxes[If[AssociationQ[audioAnalytics] && audioAnalytics =!= <||>, notebookAudioDiagnosticPlots[audioAnalysis], notebookCallout["No additional pitch, dynamics, distribution, or frequency diagnostics were emitted by this engine run.", "absent"]]]], "Output"],
+            Cell["Selected extended audio metrics", "Subsection"],
+            Cell[BoxData[ToBoxes[If[AssociationQ[audioAnalytics] && audioAnalytics =!= <||>, notebookTable[audioAnalyticsSummary], notebookCallout["No extended audio metrics were emitted by this engine run.", "absent"]]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Transcript and speech text", "MajorSection"],
+            Cell[BoxData[ToBoxes[transcriptNotice]], "Output"],
+            Cell[BoxData[ToBoxes[transcriptTextBlock]], "Output"],
+            Cell["Timestamped segments", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookRecordsTable[transcriptSegments, "No timestamped transcript segments are attached to this run."]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Cross-modal timeline", "MajorSection"],
+            Cell["Audio activity, normalized RMS and loudness, sampled brightness, motion intensity, scene-change markers, and transcript coverage share one media-time axis. Empty lanes are evidence of unavailable data, not zero-valued measurements.", "Text"],
+            Cell[BoxData[ToBoxes[crossModal]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Provenance and evidence", "MajorSection"],
+            Cell["These records make the notebook traceable to its local source, source-evidence document, and execution identity.", "Text"],
+            Cell[BoxData[ToBoxes[notebookTable[provenanceDetails]]], "Output"],
+            Cell["Evidence event summary", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookTable[eventSummary]]], "Output"],
+            Cell["Output inventory", "Subsection"],
+            Cell["The notebook hash is necessarily recorded only after this document is written; all earlier artifacts are hashed before notebook construction.", "Text"],
+            Cell[BoxData[ToBoxes[notebookRecordsTable[artifactInventory, "No output artifacts were found."]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[Join[
+            {
+                Cell["Capabilities and methodology", "MajorSection"],
+                Cell[BoxData[ToBoxes[notebookCapabilityTable[capabilities]]], "Output"]
+            },
+            Cell[#, "Item"] & /@ methodologyItems
+        ], Open]],
+
+        Cell[CellGroupData[{
+            Cell["Re-run through the verified package", "Section"],
+            Cell["The notebook is a review surface. This input cell invokes the same package entry point as the headless local runner; it does not contain a second analysis implementation.", "Text"],
             Cell[rerunCode, "Input"]
+        }, Open]]
+    };
+    Notebook[
+        cells,
+        WindowTitle -> "Babelapha media intelligence — " <> ToString[notebookLookup[input, "object_id", "local analysis"]],
+        WindowSize -> {1260, 900},
+        WindowMargins -> {{Automatic, 20}, {Automatic, 20}},
+        PageWidth -> 780,
+        PrintingOptions -> {
+            "FacingPages" -> False,
+            "FirstPageHeader" -> False,
+            "PaperOrientation" -> "Portrait",
+            "PaperSize" -> {612, 792},
+            "PrintingMargins" -> {{32, 32}, {38, 38}}
         },
-        WindowTitle -> "Babelapha Mathematica analysis"
+        StyleDefinitions -> notebookStyleDefinitions[],
+        TaggingRules -> <|
+            "analysis_id" -> notebookLookup[input, "analysis_id", Null],
+            "object_id" -> notebookLookup[input, "object_id", Null],
+            "run_id" -> notebookLookup[input, "run_id", Null]
+        |>
     ]
 ];
 
@@ -173,7 +940,7 @@ outputRecord[path_String, mediaType_String] := <|
 
 exportAnalysisArtifacts[input_Association, media_Association, measurements_Association, provenance_Association, outputDirectory_String, packageLoader_String, inputPath_String] := Module[
     {audioPNG, audioSVG, contactPNG, summaryPNG, markdownPath, htmlPath, notebookPath,
-     audioGraphic, audioVectorGraphic, contact, summaryPlot, markdown, html, notebook, outputs, capabilities},
+     audioGraphic, audioVectorGraphic, contact, summaryPlot, markdown, html, notebook, outputs, capabilities, visuals},
     If[! DirectoryQ[outputDirectory], CreateDirectory[outputDirectory, CreateIntermediateDirectories -> True]];
     audioPNG = FileNameJoin[{outputDirectory, "audio-overview.png"}];
     audioSVG = FileNameJoin[{outputDirectory, "audio-overview.svg"}];
@@ -198,7 +965,12 @@ exportAnalysisArtifacts[input_Association, media_Association, measurements_Assoc
     exportChecked[markdownPath, markdown, "Text"];
     html = htmlReport[input, measurements, provenance, capabilities];
     exportChecked[htmlPath, html, "Text"];
-    notebook = analysisNotebook[input, measurements, provenance, packageLoader, inputPath];
+    visuals = <|
+        "audio_overview" -> notebookAudioOverviewPanel[media["audio_analysis"]],
+        "video_contact_sheet" -> contact,
+        "video_summary" -> ImageResize[Import[summaryPNG], 720]
+    |>;
+    notebook = analysisNotebook[input, media, measurements, provenance, capabilities, visuals, outputDirectory, packageLoader, inputPath];
     Quiet[Check[Put[notebook, notebookPath], throwAnalysisException[ExportException, "NOTEBOOK_EXPORT_FAILED", "The analysis notebook could not be written.", 20, <|"Path" -> notebookPath|>]]];
     ensureCondition[FileExistsQ[notebookPath] && FileByteCount[notebookPath] > 0, ExportException, "NOTEBOOK_EXPORT_FAILED", "The analysis notebook could not be written.", 20, <|"Path" -> notebookPath|>];
     outputs = {

@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 
@@ -14,10 +15,7 @@ boundary = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(boundary)
 
-try:
-    import jsonschema
-except ImportError:  # pragma: no cover - the boundary itself is dependency-free
-    jsonschema = None
+import jsonschema
 
 
 class MathematicaLocalBoundaryTests(unittest.TestCase):
@@ -28,6 +26,7 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         self.source_path = self.workspace / "ingest" / "sample.mp4"
         self.source_path.write_bytes(b"deterministic-video-fixture\x00\x01\x02")
         boundary.prepare_analysis_input(self.workspace)
+        self._write_runtime_manifest()
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -35,11 +34,90 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
     def _input(self):
         return boundary.load_json(self.workspace / "artefacts" / "analysis-input.json")
 
+    def _write_runtime_manifest(
+        self,
+        *,
+        wolfram_version="15.0.1 for Microsoft Windows (64-bit)",
+        system_id="Windows-x86-64",
+        version_number=15.0,
+    ):
+        analysis_input = self._input()
+        runtime = {
+            "schema_version": boundary.SCHEMA_VERSION,
+            "recorded_at": "2026-09-16T00:00:00Z",
+            "local_only": True,
+            "workspace": str(self.workspace.resolve()),
+            "source_path": str(self.source_path.resolve()),
+            "analysis_id": analysis_input["analysis_id"],
+            "run_id": analysis_input["run_id"],
+            "package_sha256": analysis_input["package_sha256"],
+            "git_commit": "0" * 40,
+            "git_worktree_clean": True,
+            "git_status_entry_count": 0,
+            "wolfram": {
+                "wolframscript_path": "C:/Wolfram/wolframscript.exe",
+                "kernel_path": "C:/Wolfram/WolframKernel.exe",
+                "version": wolfram_version,
+                "version_number": version_number,
+                "release_number": 1,
+                "system_id": system_id,
+                "processor_type": "x86-64",
+                "media_backend": "Wolfram Language Import",
+            },
+            "python": {
+                "executable": "python",
+                "role": "input and output contract boundary only",
+            },
+            "analysis_parameters": {
+                **analysis_input["parameters"],
+                "transcript_mode": analysis_input["transcript"]["mode"],
+            },
+            "speech_model_cache_requested": False,
+            "repeatability_requested": False,
+        }
+        path = self.workspace / "artefacts" / "runtime.json"
+        path.write_text(json.dumps(runtime), encoding="utf-8")
+        return path
+
     def _write_outputs(self):
         outputs = []
         for name, media_type in sorted(boundary.EXPECTED_OUTPUT_MEDIA_TYPES.items()):
             path = self.workspace / "output" / name
-            body = f"portable Mathematica artifact: {name}\n".encode("utf-8")
+            if name == "analysis-notebook.nb":
+                sections = [
+                    "Executive overview",
+                    "Video storyboard",
+                    "Color analysis",
+                    "Motion and temporal structure",
+                    "Sound intelligence",
+                    "Transcript and speech text",
+                    "Cross-modal timeline",
+                    "Provenance and evidence",
+                    "Output inventory",
+                    "Capabilities and methodology",
+                    "Re-run through the verified package",
+                ]
+                body = (
+                    "Notebook[{\n"
+                    + "\n".join(sections)
+                    + "\n"
+                    + "GraphicsBox[{}]\n" * 5
+                    + "}]\n"
+                ).encode("utf-8")
+            elif name.endswith(".png"):
+                body = (
+                    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+                    + struct.pack(">II", 1, 1)
+                    + b"test-png"
+                )
+            elif name.endswith(".svg"):
+                body = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>\n'
+            elif name.endswith(".html"):
+                body = b"<!doctype html><html><head></head><body>report</body></html>\n"
+            elif name.endswith(".md"):
+                body = b"# Portable Mathematica report\n"
+            else:
+                body = f"portable Mathematica artifact: {name}\n".encode("utf-8")
             path.write_bytes(body)
             outputs.append(
                 {
@@ -51,14 +129,202 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
             )
         return outputs
 
+    @staticmethod
+    def _distribution(value=1.0, count=1):
+        if count == 0:
+            return {
+                "count": 0,
+                "minimum": None,
+                "q05": None,
+                "q25": None,
+                "median": None,
+                "q75": None,
+                "q95": None,
+                "maximum": None,
+                "mean": None,
+                "standard_deviation": None,
+            }
+        return {
+            "count": count,
+            "minimum": value,
+            "q05": value,
+            "q25": value,
+            "median": value,
+            "q75": value,
+            "q95": value,
+            "maximum": value,
+            "mean": value,
+            "standard_deviation": 0.0,
+        }
+
+    def _audio_analytics(self, audio=True):
+        feature_names = (
+            "rms_amplitude",
+            "peak_amplitude",
+            "spectral_centroid",
+            "spectral_spread",
+            "zero_crossing_rate",
+            "local_loudness",
+            "fundamental_frequency",
+        )
+        if not audio:
+            return {
+                "status": "UNAVAILABLE",
+                "reason": "The video has no decodable audio track.",
+                "method": "Wolfram AudioLocalMeasurements over configured overlapping windows",
+                "dynamics": {},
+                "distribution": {},
+                "frequency": {},
+                "pitch": {
+                    "status": "UNAVAILABLE",
+                    "reason": "The video has no decodable audio track.",
+                    "method": "AudioLocalMeasurements/FundamentalFrequency",
+                    "observation_count": 0,
+                    "window_count": 0,
+                    "coverage_fraction": 0.0,
+                    "fundamental_frequency_hz": self._distribution(count=0),
+                },
+                "availability": {
+                    name: {
+                        "status": "UNAVAILABLE",
+                        "observation_count": 0,
+                        "reason": "No audio track.",
+                    }
+                    for name in feature_names
+                },
+            }
+        return {
+            "status": "AVAILABLE",
+            "reason": "",
+            "method": "Wolfram AudioLocalMeasurements over configured overlapping windows",
+            "dynamics": {
+                "rms_amplitude": self._distribution(0.1, 10),
+                "peak_amplitude": self._distribution(0.5, 10),
+                "rms_dbfs": self._distribution(-20.0, 10),
+                "local_loudness": self._distribution(-18.5, 10),
+                "crest_factor": 5.0,
+                "crest_factor_db": 13.9794,
+                "local_dynamic_range_db": 4.0,
+            },
+            "distribution": {
+                "rms_amplitude_histogram": {
+                    "bin_edges": [0.0, 0.2],
+                    "counts": [10],
+                    "fractions": [1.0],
+                },
+                "rms_dbfs_histogram": {
+                    "bin_edges": [-30.0, -10.0],
+                    "counts": [10],
+                    "fractions": [1.0],
+                },
+            },
+            "frequency": {
+                "spectral_centroid_hz": self._distribution(440.0, 10),
+                "spectral_spread_hz": self._distribution(200.0, 10),
+                "zero_crossing_rate": self._distribution(100.0, 10),
+                "nyquist_frequency_hz": 24000.0,
+            },
+            "pitch": {
+                "status": "AVAILABLE",
+                "reason": "",
+                "method": "AudioLocalMeasurements/FundamentalFrequency",
+                "observation_count": 5,
+                "window_count": 10,
+                "coverage_fraction": 0.5,
+                "fundamental_frequency_hz": self._distribution(200.0, 5),
+            },
+            "availability": {
+                name: {
+                    "status": "AVAILABLE",
+                    "observation_count": 5 if name == "fundamental_frequency" else 10,
+                    "reason": "",
+                }
+                for name in feature_names
+            },
+        }
+
+    def _video_analytics(self):
+        times = [0.0, 2.0, 4.0]
+        frames = []
+        for index, timestamp in enumerate(times, start=1):
+            frames.append(
+                {
+                    "sample_index": index,
+                    "time_seconds": timestamp,
+                    "frame_difference": 0.0 if index == 1 else 0.1,
+                    "color_histogram_distance": 0.0 if index == 1 else 0.1,
+                    "brightness": 0.4,
+                    "saturation": 0.2,
+                    "contrast": 0.1,
+                    "colorfulness": 0.15,
+                    "mean_rgb": {"red": 0.3, "green": 0.4, "blue": 0.5},
+                    "mean_color_hex": "#4C6680",
+                }
+            )
+        return {
+            "sample_times_seconds": times,
+            "per_frame": frames,
+            "color": {
+                "method": "deterministic sampled-frame quantization",
+                "mean_rgb": {"red": 0.3, "green": 0.4, "blue": 0.5},
+                "palette": [
+                    {
+                        "rank": 1,
+                        "hex": "#4C6680",
+                        "rgb": {"red": 0.3, "green": 0.4, "blue": 0.5},
+                        "fraction": 1.0,
+                    }
+                ],
+                "brightness": self._distribution(0.4, 3),
+                "saturation": self._distribution(0.2, 3),
+                "contrast": self._distribution(0.1, 3),
+                "colorfulness": self._distribution(0.15, 3),
+            },
+            "scene_changes": {
+                "method": "sampled-frame grayscale motion and RGB histogram distance",
+                "threshold": 0.2,
+                "candidates": [],
+            },
+        }
+
+    @staticmethod
+    def _unavailable_transcript():
+        return {
+            "status": "UNAVAILABLE",
+            "reason": "The pinned local model is not cached.",
+            "method": "wolfram_whisper_v1_tiny",
+            "text": "",
+            "segments": [],
+            "statistics": {
+                "character_count": 0,
+                "word_count": 0,
+                "sentence_count": 0,
+                "unique_word_count": 0,
+                "lexical_diversity": None,
+                "words_per_minute": None,
+                "top_terms": [],
+            },
+            "model": None,
+            "sidecar": None,
+            "inference": None,
+        }
+
     def _valid_result(self, *, audio=True):
         analysis_input = self._input()
         capabilities = {
             name: {"status": "USED", "reason": ""}
             for name in boundary.CAPABILITY_KEYS
         }
+        capabilities["transcript_analysis"] = {
+            "status": "UNAVAILABLE",
+            "reason": "The pinned local model is not cached.",
+        }
         if not audio:
             capabilities["audio_track"] = {
+                "status": "UNAVAILABLE",
+                "reason": "The source has no audio track.",
+            }
+            capabilities["sound_analysis"] = {
                 "status": "UNAVAILABLE",
                 "reason": "The source has no audio track.",
             }
@@ -75,6 +341,7 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                 "network_mode": "disabled",
             },
             "source": analysis_input["source"],
+            "transcript": analysis_input["transcript"],
             "evidence": analysis_input["evidence"],
             "parameters": analysis_input["parameters"],
             "capabilities": capabilities,
@@ -124,6 +391,9 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                         "maximum": 0.25,
                     },
                 },
+                "video_analytics": self._video_analytics(),
+                "audio_analytics": self._audio_analytics(audio),
+                "transcript": self._unavailable_transcript(),
             },
             "provenance_summary": {
                 "task_count": 2,
@@ -179,6 +449,41 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(boundary.InputContractError, "Unsupported ingest"):
             boundary.prepare_analysis_input(self.workspace)
 
+    def test_prepare_binds_an_optional_transcript_sidecar(self):
+        sidecar = self.workspace / "transcripts" / "sample.srt"
+        sidecar.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nLocal transcript.\n",
+            encoding="utf-8",
+        )
+
+        details = boundary.prepare_analysis_input(
+            self.workspace, transcript_mode="prefer_sidecar"
+        )
+        analysis_input = self._input()
+        evidence = boundary.load_json(
+            self.workspace / "artefacts" / "source-evidence.json"
+        )
+
+        self.assertEqual(analysis_input["transcript"]["sidecar"]["format"], "srt")
+        self.assertEqual(
+            analysis_input["transcript"]["sidecar"]["sha256"],
+            hashlib.sha256(sidecar.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(details["transcript_sha256"], analysis_input["transcript"]["sidecar"]["sha256"])
+        self.assertEqual(len(evidence["events"]), 4)
+        self.assertEqual(evidence["events"][-1]["artifact_count"], 2)
+        self.assertEqual(boundary.validate_analysis_input(self.workspace), analysis_input)
+
+    def test_prepare_enforces_transcript_modes(self):
+        with self.assertRaisesRegex(boundary.InputContractError, "requires one"):
+            boundary.prepare_analysis_input(self.workspace, transcript_mode="sidecar")
+
+        (self.workspace / "transcripts" / "sample.txt").write_text(
+            "Local transcript.", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(boundary.InputContractError, "requires transcripts/"):
+            boundary.prepare_analysis_input(self.workspace, transcript_mode="disabled")
+
     def test_prepared_input_detects_source_and_evidence_tampering(self):
         self.source_path.write_bytes(self.source_path.read_bytes() + b"tampered")
         with self.assertRaisesRegex(boundary.IntegrityError, "size differs"):
@@ -230,6 +535,33 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(boundary.ResultContractError, "null audio measurements"):
             boundary.validate_result(self.workspace)
 
+    def test_validate_rejects_invalid_pitch_and_transcript_provenance(self):
+        invalid_pitch = self._valid_result()
+        invalid_pitch["measurements"]["audio_analytics"]["pitch"]["status"] = "BANANA"
+        self._write_raw_result(invalid_pitch)
+        with self.assertRaisesRegex(boundary.ResultContractError, "pitch.status"):
+            boundary.validate_result(self.workspace)
+
+        invented_transcript = self._valid_result()
+        invented_transcript["measurements"]["transcript"].update(
+            {
+                "status": "AVAILABLE",
+                "reason": "",
+                "method": "unknown_remote_service",
+                "text": "Invented transcript",
+            }
+        )
+        invented_transcript["measurements"]["transcript"]["statistics"][
+            "character_count"
+        ] = len("Invented transcript")
+        invented_transcript["capabilities"]["transcript_analysis"] = {
+            "status": "USED",
+            "reason": "",
+        }
+        self._write_raw_result(invented_transcript)
+        with self.assertRaisesRegex(boundary.ResultContractError, "method is unsupported"):
+            boundary.validate_result(self.workspace)
+
     def test_validate_requires_core_mathematica_capabilities(self):
         result = self._valid_result()
         result["capabilities"]["tabular"] = {
@@ -244,9 +576,21 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
     def test_validate_accepts_a_newer_wolfram_major_version(self):
         result = self._valid_result()
         result["processor"]["wolfram_version"] = "16.0.0 for Microsoft Windows (64-bit)"
+        self._write_runtime_manifest(
+            wolfram_version="16.0.0 for Microsoft Windows (64-bit)",
+            version_number=16.0,
+        )
         self._write_raw_result(result)
 
         boundary.validate_result(self.workspace)
+
+    def test_validate_rejects_runtime_identity_mismatch(self):
+        result = self._valid_result()
+        result["processor"]["system_id"] = "made-up-system"
+        self._write_raw_result(result)
+
+        with self.assertRaisesRegex(boundary.IntegrityError, "system ID differs"):
+            boundary.validate_result(self.workspace)
 
     def test_audio_intervals_use_audio_stream_duration(self):
         result = self._valid_result()
@@ -289,6 +633,35 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(boundary.IntegrityError, "Output size differs"):
             boundary.validate_result(self.workspace)
 
+    def test_validate_rejects_spoofed_output_format(self):
+        result = self._valid_result()
+        png = self.workspace / "output" / "video-summary.png"
+        fake = b"plain text posing as a png"
+        png.write_bytes(fake)
+        record = next(item for item in result["outputs"] if item["path"] == png.name)
+        record["sha256"] = hashlib.sha256(fake).hexdigest()
+        record["size_bytes"] = len(fake)
+        self._write_raw_result(result)
+
+        with self.assertRaisesRegex(boundary.ResultContractError, "not a PNG"):
+            boundary.validate_result(self.workspace)
+
+    def test_failed_revalidation_removes_stale_success_markers(self):
+        result = self._valid_result()
+        self._write_raw_result(result)
+        boundary.validate_result(self.workspace)
+        repeatability = self.workspace / "artefacts" / "repeatability.json"
+        repeatability.write_text("stale", encoding="utf-8")
+
+        (self.workspace / "output" / "report.md").write_text(
+            "tampered", encoding="utf-8"
+        )
+        with self.assertRaises(boundary.IntegrityError):
+            boundary.validate_result(self.workspace)
+
+        self.assertFalse((self.workspace / "output" / "result.json").exists())
+        self.assertFalse(repeatability.exists())
+
     def test_strict_loader_rejects_duplicate_keys(self):
         path = self.workspace / "artefacts" / "duplicate.json"
         path.write_text('{"same": 1, "same": 2}', encoding="utf-8")
@@ -303,20 +676,29 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         self.assertEqual(first.read_bytes(), second.read_bytes())
         self.assertEqual(first_identity, second_identity)
 
-    @unittest.skipIf(jsonschema is None, "jsonschema is not installed")
     def test_documents_conform_to_published_schemas(self):
         analysis_input = self._input()
         evidence = boundary.load_json(self.workspace / "artefacts" / "source-evidence.json")
         result = self._valid_result()
         documents = [
-            ("mathematica-local-analysis-input-v1.schema.json", analysis_input),
-            ("mathematica-local-source-evidence-v1.schema.json", evidence),
-            ("mathematica-local-analysis-result-v1.schema.json", result),
+            ("mathematica-local-analysis-input-v2.schema.json", analysis_input),
+            ("mathematica-local-source-evidence-v2.schema.json", evidence),
+            ("mathematica-local-analysis-result-v2.schema.json", result),
         ]
         for filename, document in documents:
             with self.subTest(schema=filename):
                 schema = json.loads((ROOT / "contracts" / filename).read_text(encoding="utf-8"))
                 jsonschema.Draft202012Validator(schema).validate(document)
+
+        invalid_result = copy.deepcopy(result)
+        invalid_result["measurements"]["transcript"]["model"] = {}
+        result_schema = json.loads(
+            (ROOT / "contracts" / "mathematica-local-analysis-result-v2.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(result_schema).validate(invalid_result)
 
 
 if __name__ == "__main__":
