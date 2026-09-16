@@ -125,7 +125,7 @@ Mathematica independently recomputes the package identity and verifies source,
 evidence, and sidecar byte identities before opening media. The validation
 boundary permits no undeclared result fields or outputs, checks method-specific
 transcript provenance, recomputes the current package hash, verifies the
-eleven-section notebook structure, and recomputes every declared output
+thirteen-section notebook structure and linked-cursor markers, and recomputes every declared output
 identity. Preparing a new valid run removes prior canonical/raw result markers
 so a failed rerun cannot look successful.
 

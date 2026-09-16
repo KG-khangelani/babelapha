@@ -33,13 +33,17 @@ Implemented v2 baseline:
   labels only after their cached bytes have been verified;
 - inference is local, greedy, CPU-targeted, and records model and inference
   provenance; normal analysis runs with network access disabled;
+- audio is materialized, mixed to mono, split by sample index, and zero-padded
+  to deterministic 30-second model inputs instead of relying on the failing
+  `AudioPartition` pad path;
 - text, timestamped segments, word/sentence counts, lexical diversity, top
   terms, and words per minute are emitted in the v2 result and notebook.
 
-The validated reference run produced an available Whisper transcript using the
-verified resource UUID/version and three verified model components. This proves
-the local mechanism, not transcript accuracy for every accent, language, or
-recording condition.
+The validated reference run produced a coherent 29-word Whisper transcript for
+the local ten-second interview clip using the verified resource UUID/version
+and three verified model components. This proves the local mechanism for that
+clip, not transcript accuracy for every accent, language, or recording
+condition.
 
 Potential value:
 

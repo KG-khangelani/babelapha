@@ -6,7 +6,7 @@ The Wolfram-first local prototype is implemented as
 `mathematica-local-media-lab-v2` and has completed an independently validated
 end-to-end video run. The reference run exercised color, motion, sound, pitch,
 spectral, transcript, and cross-modal analysis and produced the rich
-eleven-section notebook. The package requires Wolfram Language 15 or newer.
+thirteen-section notebook. The package requires Wolfram Language 15 or newer.
 The verified runtime for this checkout is **Wolfram Engine 15.0.0 for Windows
 x86-64**; every run records the exact kernel path and version rather than
 assuming a patch release.
@@ -43,12 +43,15 @@ Mathematica owns the analysis:
   spread, zero-crossing rate, fundamental-frequency candidates, spectrogram,
   and audible/silent interval analysis;
 - verified local Whisper Tiny inference or verified transcript-sidecar parsing,
-  transcript statistics, and timestamped segments;
-- a shared media-time view aligning visual, sound, scene, and speech evidence;
+  transcript statistics, deterministic 30-second audio preparation, and
+  timestamped navigation segments with explicit timing provenance;
+- one shared media-time instrument aligning visual, sound, scene, speech, and
+  cross-modal event evidence;
 - named-component `TimeSeries`, provenance `EventSeries`, and `Tabular` data;
-- plots, reports, and a reproducible eleven-section Mathematica notebook with
-  native video playback, frame/audio/timeline controls, transcript search, and
-  executable setup/rerun cells.
+- plots, reports, and a reproducible thirteen-section Mathematica notebook with
+  native video playback, one linked frame/audio/speech/scene/event cursor,
+  transcript search, evidence-backed observations, and executable setup/rerun
+  cells.
 
 Python is deliberately limited to the trust boundary. It hashes the source,
 writes strict local evidence and analysis input, rejects ambiguous JSON and

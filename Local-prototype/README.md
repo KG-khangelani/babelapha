@@ -41,6 +41,13 @@ Wolfram stores the fetched resource in its local object store; `models/` is a
 workspace reservation for future exported model manifests or copies, not a
 second implicit cache.
 
+Automatic transcription materializes the selected audio locally, mixes it to
+mono, divides it into deterministic 30-second sample ranges, and zero-pads the
+last range to the length required by Whisper. This avoids the unreliable
+`AudioPartition` padding path while preserving the model's documented input
+shape. Sentence-level navigation boundaries derived inside a model segment are
+marked as proportional estimates, not word timestamps or diarization.
+
 Use `-TranscriptMode automatic` to require the cached model,
 `-TranscriptMode sidecar` to require a sidecar, or
 `-TranscriptMode disabled` to make the omission explicit. If the selected
@@ -116,13 +123,17 @@ Invoke-Item .\Local-prototype\output\analysis-notebook.nb
 ```
 
 The notebook uses Mathematica's default styles. It provides local video
-playback, animated frame scrubbing, selectable sound measurements, transcript
-segment navigation and search, and a shared cross-modal time cursor. Transcript
+playback plus one shared analytical time cursor that drives the nearest frame,
+selectable sound measurements, transcript navigation/search, RMS activity,
+scene segment, and cross-modal event. Native video playback is intentionally
+independent of the analysis cursor because the saved `Video` control has no
+stable programmatic seek binding. Transcript
 diagnostics display the actual emitted mode, status, method, model or sidecar,
 and failure reason; the exporter does not replace them with generic text.
 
-The current notebook has eleven sections and embeds the analytical
-graphics directly: six KPI cards, a contact sheet and explorer for all twelve sampled frames, dominant colors,
+The current notebook has thirteen sections and embeds the analytical
+graphics directly: six KPI cards, an evidence-backed insight table, a linked
+media explorer, a contact sheet for all twelve sampled frames, dominant colors,
 RGB/brightness trajectories, motion and scene-change candidates, waveform,
 RMS/peak/loudness curves, spectral centroid/spread, zero-crossing rate,
 fundamental-frequency candidates, spectrogram, audible/silent intervals,

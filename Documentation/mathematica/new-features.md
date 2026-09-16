@@ -30,12 +30,16 @@ from Babelapha having exercised it successfully:
 | `Tabular` interoperability | Validated | Typed internal evidence table with portable summary |
 | First-class `Video`, `Audio`, plots, and spectrograms | Validated | Color, motion, sound, pitch, and notebook visuals |
 | Wolfram neural-network repository resource | Validated locally | Pinned and hash-verified Whisper-V1 Tiny CPU inference |
-| Rich Mathematica notebook authoring | Validated | Eleven-section `Default.nb` notebook with native media, `DynamicModule` explorers, transcript search, and package-backed input cells |
+| Rich Mathematica notebook authoring | Validated | Thirteen-section `Default.nb` notebook with one linked `DynamicModule` media cursor, native playback, transcript search, evidence-backed observations, and package-backed input cells |
 | `ModelFit`/`ModelFitReport`, semantic retrieval, LLM graphs, MCP, standalone applications, AI Assistant | Not implemented | Separately gated future experiments |
 
 The Whisper cache command is intentionally the only network-enabled step. The
 validated analysis result identifies the resource UUID, version, size, three
 component hashes, CPU target, greedy sampling, and disabled network mode.
+Short clips are materialized, mixed to mono, and deterministically zero-padded
+to Whisper's documented 30-second input length; this was necessary for accurate
+local inference and avoids depending on `AudioPartition`'s failing pad path for
+the imported video audio object.
 
 ## Used in the Babelapha prototype
 

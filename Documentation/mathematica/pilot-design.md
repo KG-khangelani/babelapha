@@ -123,7 +123,9 @@ are combined into named-component `TimeSeries` values.
 Transcript analysis either parses a verified `.txt`, `.srt`, or `.vtt`
 sidecar, or performs greedy CPU inference with the verified cached Wolfram
 Whisper-V1 Tiny encoder, decoder, and labels while network access is disabled.
-The result includes method, status/reason, text, timestamped segments,
+Automatic audio is locally materialized, mixed to mono, split by sample index,
+and zero-padded to deterministic 30-second model inputs. The result includes
+method, status/reason, text, timestamped segments,
 statistics, and model/inference or sidecar provenance. Visual, audio, scene,
 and transcript observations are then aligned on one media-time axis.
 
@@ -152,7 +154,7 @@ Wolfram produces `result.raw.json` plus these seven declared outputs:
 | `video-summary.png` | Wolfram `VideoSummaryPlot` output |
 | `report.md` | Portable text report with measurements and capabilities |
 | `report.html` | Self-contained local review page referencing the plots |
-| `analysis-notebook.nb` | Rich eleven-section review notebook and shared-package rerun cell |
+| `analysis-notebook.nb` | Rich thirteen-section review notebook, linked media cursor, and shared-package rerun cell |
 
 Python then validates exact keys and types, rejects duplicate/nonfinite JSON,
 ensures every output is a direct child of `output/`, checks the exact seven-file
@@ -181,7 +183,7 @@ boundary and [the notebook map](notebook-sections.md) for the review surface.
 | Media analysis or export failure | Typed runtime/export failure, exit code 20 |
 | Invalid raw result or output hash | Python rejects it and does not write canonical `result.json` |
 
-The validated v2 reference run passed fourteen Wolfram package tests, direct video
+The validated v2 reference run passed nineteen Wolfram package tests, direct video
 and audio analysis, all extended color/motion/sound measurements, local
 Whisper-V1 Tiny CPU transcription with three verified model components,
 seven-artifact export, and independent Python canonicalization. Its processor
