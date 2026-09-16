@@ -31,8 +31,8 @@ The shared analysis package will:
 7. represent verifier-approved stage attempts as a typed `EventSeries` and
    measurements as named-component `TimeSeries` values;
 8. summarize the ingestion stage/artifact graph without changing its meaning;
-9. emit a canonical JSON result, PNG/SVG diagnostics, and an optional
-   noncanonical Markdown review artifact.
+9. emit `result.raw.json`, PNG/SVG diagnostics, and an optional noncanonical
+   Markdown review artifact for Python validation and publication.
 
 Speech recognition, LLM calls, pretrained neural networks, and cloud functions
 are excluded from the first pilot. They can be evaluated later as separately
@@ -110,7 +110,9 @@ on Wolfram availability.
 
 ## Result interface
 
-`result.json` is the canonical analysis output. Its initial contract contains:
+The Wolfram adapter emits `result.raw.json`. A Python boundary validates its
+schema, rejects noncanonical or ambiguous values, and writes the canonical
+`result.json` analysis output. Its initial contract contains:
 
 ```json
 {

@@ -70,7 +70,7 @@ must not become the source of truth.
 
 ## Processor evidence interface
 
-This branch adds a bounded task-payload interface for processor identity:
+This branch adds a strict JSON task-payload interface for processor identity:
 
 ```json
 {
@@ -93,6 +93,8 @@ These values are copied into the immutable manifest's
 `execution.parameters` and its OpenLineage execution facet. They must be
 strict JSON values. Babelapha rejects attempts to override object, source
 commit, DAG-bundle, Git-identity, or pipeline-task-contract facts.
+The eventual task adapter must allowlist its fields and must not place license
+credentials, tokens, or other secrets in provenance parameters.
 
 ## Trust and dependency boundaries
 

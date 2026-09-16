@@ -32,8 +32,9 @@ Deliverables:
 - an evidence adapter that converts a verifier-approved bundle to `Tabular`;
 - named `TimeSeries` components for audio measurements;
 - an `EventSeries` representation of task attempts and decisions;
-- canonical `result.json`, PNG/SVG plots, and optional Markdown review export;
-- Wolfram unit tests and a Python contract verifier;
+- Wolfram `result.raw.json`, PNG/SVG plots, and optional Markdown review export;
+- Wolfram unit tests plus a Python verifier that validates and canonicalizes
+  `result.raw.json` as `result.json`;
 - the equivalent Python baseline from the existing pilot design.
 
 Exit gate: repeatable headless results, notebook/headless parity, portable
@@ -69,8 +70,8 @@ Requirements:
 Exit gate: the complete analysis task contract passes the same immutable
 manifest/OpenLineage verification standard as shipped ingestion DAGs.
 
-The branch already supplies the bounded `provenance_parameters` path needed to
-carry processor-specific facts into manifests and OpenLineage. Remaining
+The branch already supplies the strict JSON `provenance_parameters` path
+needed to carry processor-specific facts into manifests and OpenLineage. Remaining
 integration prerequisites are:
 
 - preserve an allowlisted typed failure reason from the Wolfram adapter rather

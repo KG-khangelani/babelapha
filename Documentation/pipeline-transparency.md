@@ -51,6 +51,8 @@ OpenLineage execution facet. Task values cannot replace the reserved
 `git_identity_status`, or `pipeline_task_contract` facts owned by the
 orchestrator. Invalid values, non-string object keys, NaN/infinity, and
 reserved-key collisions are rejected rather than silently normalized.
+Each task adapter must document and allowlist its processor-specific fields;
+these parameters must never contain credentials, tokens, or other secrets.
 
 `reports/<object-id>/*.json` files are mutable operational summaries retained
 for compatibility. They are not the provenance source of truth.

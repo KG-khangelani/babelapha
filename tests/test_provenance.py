@@ -553,6 +553,11 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertEqual(parameters["object_id"], "interview-042")
         self.assertEqual(parameters["analysis_id"], "audio-provenance-diagnostic-v1")
         self.assertEqual(parameters["processor"], payload["provenance_parameters"]["processor"])
+        event = provenance.build_openlineage_event(record)
+        self.assertEqual(
+            event["run"]["facets"]["babelapha_execution"]["parameters"],
+            parameters,
+        )
 
         payload["provenance_parameters"] = {"object_id": "replacement"}
         with self.assertRaisesRegex(
@@ -576,6 +581,15 @@ class ProvenanceContractTests(unittest.TestCase):
                         {"provenance_parameters": value},
                         standard,
                     )
+
+        with self.assertRaisesRegex(
+            provenance.ManifestValidationError,
+            "cannot override reserved fields: future_orchestrator_fact",
+        ):
+            provenance._execution_parameters(
+                {"provenance_parameters": {"future_orchestrator_fact": "task-value"}},
+                {**standard, "future_orchestrator_fact": "orchestrator-value"},
+            )
 
     def test_openlineage_event_reuses_manifest_identity_and_artifacts(self):
         item = provenance.artifact(

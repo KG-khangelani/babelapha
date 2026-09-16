@@ -1333,12 +1333,13 @@ def _execution_parameters(payload: dict, standard: dict) -> dict:
         return standard
     if not isinstance(supplied, dict):
         raise ManifestValidationError("provenance_parameters must be an object")
-    conflicts = sorted(RESERVED_EXECUTION_PARAMETER_KEYS.intersection(supplied))
+    _validate_json_parameter(supplied)
+    protected_keys = RESERVED_EXECUTION_PARAMETER_KEYS.union(standard)
+    conflicts = sorted(protected_keys.intersection(supplied))
     if conflicts:
         raise ManifestValidationError(
             "provenance_parameters cannot override reserved fields: " + ", ".join(conflicts)
         )
-    _validate_json_parameter(supplied)
     return {**standard, **supplied}
 
 
