@@ -2133,7 +2133,7 @@ def _validate_outputs(
         )
     audio_interactive = capabilities["audio_track"]["status"] == "USED"
     transcript_interactive = isinstance(transcript, dict) and transcript.get("status") == "AVAILABLE"
-    required_dynamic_modules = 2 + int(audio_interactive) + int(transcript_interactive)
+    required_dynamic_modules = 3 + int(audio_interactive) + int(transcript_interactive)
     required_sliders = 2 + int(audio_interactive)
     if (
         notebook_bytes.count(b"DynamicModuleBox[") < required_dynamic_modules
@@ -2145,6 +2145,10 @@ def _validate_outputs(
     if b"AnimatorBox[" not in notebook_bytes:
         raise ResultContractError(
             "analysis-notebook.nb must contain sampled-frame navigation controls"
+        )
+    if b"ButtonBox[" not in notebook_bytes or b"Load local video" not in notebook_bytes:
+        raise ResultContractError(
+            "analysis-notebook.nb must contain an explicit local-video playback control"
         )
     if (audio_interactive or transcript_interactive) and b"PopupMenuBox[" not in notebook_bytes:
         raise ResultContractError(

@@ -608,6 +608,34 @@ notebookCrossModalGraphic[duration_, audible_List, silence_List, brightnessPairs
     ]
 ];
 
+notebookVideoPlayer[sourcePath_String] := With[
+    {localPath = sourcePath},
+    DynamicModule[
+        {player = Null},
+        Column[
+            {
+                Button[
+                    "Load local video",
+                    player = Quiet@Check[
+                        If[FileExistsQ[localPath], Video[localPath, ImageSize -> Large], $Failed],
+                        $Failed
+                    ],
+                    Method -> "Queued"
+                ],
+                Dynamic[
+                    Which[
+                        Head[player] === Video, player,
+                        player === $Failed, Style["The local source video could not be loaded.", Italic],
+                        True, "Click Load local video to start the native Wolfram player."
+                    ],
+                    TrackedSymbols :> {player}
+                ]
+            }
+        ],
+        UnsavedVariables :> {player}
+    ]
+];
+
 notebookFrameExplorer[frames_List, times_List] := Module[
     {count, rgbValues, brightnessValues},
     count = Length[frames];
@@ -618,7 +646,7 @@ notebookFrameExplorer[frames_List, times_List] := Module[
     brightnessValues = notebookFrameBrightness /@ frames;
     With[
         {
-            storedFrames = ExportByteArray[ImageResize[#, 480], "JPEG"] & /@ frames,
+            storedFrames = ExportByteArray[ImageResize[#, 480], "JPEG", IncludeMetaInformation -> None] & /@ frames,
             storedTimes = N[times],
             storedRGB = N[rgbValues],
             storedBrightness = N[brightnessValues],
@@ -1029,7 +1057,7 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
         Style[transcriptContent, "Text"],
         Style["No transcript body is attached. " <> transcriptReason, Italic]
     ];
-    videoPlayer = If[FileExistsQ[sourceAbsolutePath], Video[sourceAbsolutePath, ImageSize -> Large], Style["The local source video could not be found at " <> sourceAbsolutePath, Italic]];
+    videoPlayer = notebookVideoPlayer[sourceAbsolutePath];
     frameExplorer = notebookFrameExplorer[frames, times];
     audioExplorer = notebookAudioExplorer[audioAnalysis, duration];
     transcriptExplorer = notebookTranscriptExplorer[transcript];

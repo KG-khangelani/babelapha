@@ -102,11 +102,12 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                     + "\n".join(sections)
                     + "\n"
                     + "GraphicsBox[{}]\n" * 5
-                    + "DynamicModuleBox[{}]\n" * 3
+                    + "DynamicModuleBox[{}]\n" * 5
                     + "SliderBox[{}]\n" * 3
                     + "PopupMenuBox[{}]\n"
                     + "AnimatorBox[{}]\n"
                     + "InputFieldBox[{}]\n"
+                    + 'ButtonBox["Load local video"]\n'
                     + "InitializationCell -> True\n"
                     + 'StyleDefinitions -> "Default.nb"\n'
                     + "UNAVAILABLE\n"
