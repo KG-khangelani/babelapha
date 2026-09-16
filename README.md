@@ -257,6 +257,10 @@ The implemented provenance contract, failure semantics, OpenLineage mapping,
 and exact-identity configuration are documented in
 [`Documentation/pipeline-transparency.md`](Documentation/pipeline-transparency.md).
 
+The architecture assessment for using Mathematica/Wolfram Language as an
+optional research environment and provenance-bearing analysis stage is in
+[`Documentation/mathematica/`](Documentation/mathematica/README.md).
+
 ## Continuous Integration
 
 TeamCity Kotlin DSL files live in `ci/teamcity`. The `Media Pipeline Checks` build configuration
