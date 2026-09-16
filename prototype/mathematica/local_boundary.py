@@ -2052,7 +2052,12 @@ def _invalidate_result_markers(root: Path) -> None:
         candidate.unlink()
 
 
-def _validate_outputs(root: Path, value: object) -> None:
+def _validate_outputs(
+    root: Path,
+    value: object,
+    transcript: object,
+    capabilities: dict,
+) -> None:
     if not isinstance(value, list) or len(value) != len(EXPECTED_OUTPUT_MEDIA_TYPES):
         raise ResultContractError(
             "outputs must list each required portable report, plot, and notebook exactly once"
@@ -2126,6 +2131,45 @@ def _validate_outputs(root: Path, value: object) -> None:
         raise ResultContractError(
             "analysis-notebook.nb must embed at least five analytical graphics"
         )
+    audio_interactive = capabilities["audio_track"]["status"] == "USED"
+    transcript_interactive = isinstance(transcript, dict) and transcript.get("status") == "AVAILABLE"
+    required_dynamic_modules = 2 + int(audio_interactive) + int(transcript_interactive)
+    required_sliders = 2 + int(audio_interactive)
+    if (
+        notebook_bytes.count(b"DynamicModuleBox[") < required_dynamic_modules
+        or notebook_bytes.count(b"SliderBox[") < required_sliders
+    ):
+        raise ResultContractError(
+            "analysis-notebook.nb must contain native interactive Mathematica controls"
+        )
+    if b"AnimatorBox[" not in notebook_bytes:
+        raise ResultContractError(
+            "analysis-notebook.nb must contain sampled-frame navigation controls"
+        )
+    if (audio_interactive or transcript_interactive) and b"PopupMenuBox[" not in notebook_bytes:
+        raise ResultContractError(
+            "analysis-notebook.nb must contain an available-data selector"
+        )
+    if transcript_interactive and b"InputFieldBox[" not in notebook_bytes:
+        raise ResultContractError(
+            "analysis-notebook.nb must contain transcript-search controls when a transcript is available"
+        )
+    if re.search(rb"InitializationCell\s*->\s*True", notebook_bytes) is None:
+        raise ResultContractError(
+            "analysis-notebook.nb must contain an executable initialization cell"
+        )
+    if re.search(rb'StyleDefinitions\s*->\s*"Default\.nb"', notebook_bytes) is None:
+        raise ResultContractError(
+            "analysis-notebook.nb must use Mathematica's default notebook styles"
+        )
+    if not isinstance(transcript, dict):
+        raise ResultContractError("measurements.transcript must be an object")
+    for field in ("status", "method"):
+        expected = transcript.get(field)
+        if not isinstance(expected, str) or expected.encode("utf-8") not in notebook_bytes:
+            raise ResultContractError(
+                f"analysis-notebook.nb is missing the actual transcript {field}"
+            )
 
 
 def validate_result(
@@ -2227,7 +2271,12 @@ def validate_result(
         raise IntegrityError("Mathematica reported a provenance integrity conflict")
     if provenance["evidence_sha256"] != analysis_input["evidence"]["sha256"]:
         raise IntegrityError("Provenance evidence SHA-256 differs from verified input")
-    _validate_outputs(root, result["outputs"])
+    _validate_outputs(
+        root,
+        result["outputs"],
+        result["measurements"]["transcript"],
+        result["capabilities"],
+    )
 
     result_path = root / "output" / "result.json"
     result_body = canonical_json_bytes(result)
