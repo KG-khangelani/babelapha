@@ -2,9 +2,12 @@
 
 ## Status
 
-The Wolfram-first local prototype is implemented and has completed an
-end-to-end video run. The package requires Wolfram Language 15 or newer. The
-verified runtime for this checkout is **Wolfram Engine 15.0.0 for Windows
+The Wolfram-first local prototype is implemented as
+`mathematica-local-media-lab-v2` and has completed an independently validated
+end-to-end video run. The reference run exercised color, motion, sound, pitch,
+spectral, transcript, and cross-modal analysis and produced the rich
+eleven-section notebook. The package requires Wolfram Language 15 or newer.
+The verified runtime for this checkout is **Wolfram Engine 15.0.0 for Windows
 x86-64**; every run records the exact kernel path and version rather than
 assuming a patch release.
 
@@ -18,16 +21,32 @@ Place exactly one video in `Local-prototype/ingest/`. The launcher discovers a
 working local kernel, runs the Wolfram tests and analysis, validates the result,
 and keeps all runtime material under `Local-prototype/`.
 
+The default transcript mode, `prefer_sidecar`, uses a hash-bound local `.txt`,
+`.srt`, or `.vtt` file when one matches the source. Otherwise it uses a
+previously cached and verified **Wolfram Whisper-V1 Tiny** resource. Model
+acquisition is a separate, explicit online preparation action; analysis then
+runs with Wolfram internet access disabled:
+
+```powershell
+.\scripts\Invoke-MathematicaLocalPrototype.ps1 -PrepareSpeechModelOnly
+.\scripts\Invoke-MathematicaLocalPrototype.ps1 -TranscriptMode prefer_sidecar
+```
+
 ## Local boundary
 
 Mathematica owns the analysis:
 
 - direct `Video` import and audio-track extraction;
-- sampled-frame brightness, color, and motion analysis;
-- RMS amplitude, peak amplitude, EBU loudness, spectral centroid, and
-  audible/silent interval analysis;
+- sampled-frame brightness, RGB, saturation, contrast, colorfulness, palette,
+  histogram-distance, motion, and scene-change analysis;
+- RMS and peak amplitude, EBU loudness, dynamic range, spectral centroid and
+  spread, zero-crossing rate, fundamental-frequency candidates, spectrogram,
+  and audible/silent interval analysis;
+- verified local Whisper Tiny inference or verified transcript-sidecar parsing,
+  transcript statistics, and timestamped segments;
+- a shared media-time view aligning visual, sound, scene, and speech evidence;
 - named-component `TimeSeries`, provenance `EventSeries`, and `Tabular` data;
-- plots, reports, and a reproducible Mathematica notebook.
+- plots, reports, and a reproducible eleven-section Mathematica notebook.
 
 Python is deliberately limited to the trust boundary. It hashes the source,
 writes strict local evidence and analysis input, rejects ambiguous JSON and
@@ -38,6 +57,10 @@ produce the human-facing analysis.
 The Version 15 package uses Structured Package Format through
 `PackageInitialize` and registered typed exceptions. Expected failures map to
 stable reason codes and process exit codes.
+
+The current wire contracts are the three `mathematica-local-*-v2` schemas.
+The v1 schemas remain checked in as immutable historical contracts and are
+superseded, not rewritten.
 
 ## Portable outputs
 
@@ -60,6 +83,7 @@ strictly validated canonical `result.json`.
 - [Local workspace and command](../../Local-prototype/README.md)
 - [Implemented pilot](pilot-design.md)
 - [Local architecture](architecture.md)
+- [Notebook sections](notebook-sections.md)
 - [Mathematica leverage roadmap](leverage-roadmap.md)
 - [Capability assessment](capability-assessment.md)
 - [Current and recent features](new-features.md)
@@ -70,7 +94,7 @@ strictly validated canonical `result.json`.
 ## Deferred production path
 
 Airflow, MinIO publication, containerized Wolfram execution, OpenLineage
-emission, MCP, cloud services, LLMs, and speech services are not part of this
-implemented prototype. They remain possible later phases only after the local
-Mathematica work establishes a concrete analytical advantage and its licensing
-and operational model is approved.
+emission, MCP, cloud services, LLMs, and external speech services are not part
+of this implemented prototype. They remain possible later phases only after
+the local Mathematica work establishes a concrete analytical advantage and its
+licensing and operational model is approved.

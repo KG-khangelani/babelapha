@@ -272,8 +272,10 @@ The implemented provenance contract, failure semantics, OpenLineage mapping,
 and exact-identity configuration are documented in
 [`Documentation/pipeline-transparency.md`](Documentation/pipeline-transparency.md).
 
-The implemented Wolfram-first local media lab, its newer Mathematica features,
-and the deferred production decision are documented in
+The implemented v2 Wolfram-first local media lab—including its eleven-section
+notebook, color/motion/sound/pitch/spectrogram analysis, verified local Whisper
+Tiny or transcript-sidecar path, newer Mathematica features, and deferred
+production decision—is documented in
 [`Documentation/mathematica/`](Documentation/mathematica/README.md).
 
 ## Continuous Integration

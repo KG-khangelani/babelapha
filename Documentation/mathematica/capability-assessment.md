@@ -24,6 +24,23 @@ Wolfram implementation more reproducible or operationally safer.
 
 ### Transcript and language analysis
 
+Implemented v2 baseline:
+
+- `prefer_sidecar` discovers and SHA-256-binds a matching local `.txt`, `.srt`,
+  or `.vtt` transcript; `sidecar`, `automatic`, and `disabled` make the desired
+  behavior explicit;
+- automatic mode uses the pinned Wolfram Whisper-V1 Tiny encoder, decoder, and
+  labels only after their cached bytes have been verified;
+- inference is local, greedy, CPU-targeted, and records model and inference
+  provenance; normal analysis runs with network access disabled;
+- text, timestamped segments, word/sentence counts, lexical diversity, top
+  terms, and words per minute are emitted in the v2 result and notebook.
+
+The validated reference run produced an available Whisper transcript using the
+verified resource UUID/version and three verified model components. This proves
+the local mechanism, not transcript accuracy for every accent, language, or
+recording condition.
+
 Potential value:
 
 - language identification, tokenization, grammatical structure, entity-like
@@ -34,19 +51,30 @@ Potential value:
 
 Risks and limits:
 
-- Babelapha's current local ingestion DAG does not yet produce transcripts, so
-  this is not the first executable pilot;
-- pretrained resources, LLM functions, semantic functions, and speech
-  recognition may introduce downloads, credentials, service calls, changing
-  models, or nondeterministic behavior;
+- transcript sidecars remain user-supplied local inputs; the ingestion DAG does
+  not produce them;
+- the Whisper cache step requires a deliberate one-time online acquisition,
+  and cached-resource identity must remain pinned and verified;
+- LLM and semantic functions would still introduce separate model, service,
+  credential, and nondeterminism concerns and are not used here;
 - language coverage and accuracy must be tested on the actual interview
   languages and recording conditions rather than inferred from API breadth.
 
-Verdict: **promising after a canonical transcript artifact exists**. Prefer
-deterministic text statistics first; treat model- or service-backed operations
-as separately identified processors.
+Verdict: **validated for a local research transcript path**. Keep sidecar and
+Whisper provenance distinct, evaluate accuracy on representative interviews,
+and treat future model- or service-backed operations as separately identified
+processors.
 
 ### Audio and speech diagnostics
+
+Implemented v2 baseline:
+
+- global and overlapping-window RMS, peak, and loudness measurements;
+- crest factor, local dynamic range, RMS/dBFS distributions, audible/silent
+  intervals, spectral centroid/spread, zero-crossing rate, and pitch coverage;
+- waveform, diagnostic curves, and spectrogram embedded in the notebook;
+- per-feature availability instead of invented values when a measurement is
+  not meaningful.
 
 Potential value:
 
@@ -60,14 +88,23 @@ Risks and limits:
 
 - FFmpeg and Python libraries already cover much of the same ground;
 - codec behavior may still depend on the host and FFmpeg installation;
-- speech recognition and pretrained models require separate dependency and
-  accuracy evaluation.
+- pitch and speech recognition remain signal/model dependent and require
+  coverage and accuracy evaluation rather than a blanket “available” claim.
 
-Verdict: **best first pilot area** because it uses media that Babelapha already
-has, creates visible results, and exercises numeric reproducibility without
-requiring a transcription subsystem.
+Verdict: **implemented and validated as the strongest local Mathematica use
+case so far**. It creates visible, inspectable results while retaining explicit
+feature availability and portable summaries.
 
 ### Video-frame analysis
+
+Implemented v2 baseline:
+
+- twelve uniformly sampled frames, contact sheet, and `VideoSummaryPlot`;
+- per-frame RGB, brightness, saturation, contrast, colorfulness, motion, and
+  color-histogram distance;
+- an eight-color deterministic palette and thresholded scene-change
+  candidates;
+- shared-time alignment with audio and transcript evidence.
 
 Potential value:
 
@@ -83,8 +120,8 @@ Risks and limits:
 - pretrained network identity and model-resource availability must be pinned
   or recorded.
 
-Verdict: **use selectively for sampled-frame research**, not routine media
-packaging.
+Verdict: **implemented for selective sampled-frame research**, not routine
+media packaging or a replacement for the FFmpeg rendition path.
 
 ### Provenance and operational analysis
 
@@ -141,5 +178,7 @@ Every candidate function used in a pilot must be classified before execution:
 | Downloaded resource | neural nets, paclets, curated datasets | resource name, version/digest, acquisition state |
 | External service | LLM, cloud, or connected service operations | provider/model, request parameters, response identity where available, policy approval |
 
-The pilot should prefer the first two classes. An external service must never
-be silently reached from a supposedly local or reproducible analysis.
+The lab prefers the first two classes. Whisper is the one current downloaded
+resource: acquisition is explicit, its component bytes are verified, and the
+subsequent processor records disabled network mode. An external service must
+never be silently reached from a supposedly local or reproducible analysis.

@@ -17,7 +17,27 @@ Authoritative release references:
 - [Version 15 feature overview](https://www.wolfram.com/language/new-in-15/)
 - [Official Wolfram Engine image tags](https://hub.docker.com/r/wolframresearch/wolframengine/tags)
 
-## Use in the first Babelapha prototype
+## What v2 actually validates
+
+The local lab separates a feature being available in a recent Wolfram release
+from Babelapha having exercised it successfully:
+
+| Wolfram capability | v2 status | Babelapha use |
+|---|---|---|
+| Version 15 Structured Package Format and `PackageInitialize` | Validated | Multi-file `BabelaphaAnalysis` package |
+| Version 15 registered exceptions | Validated | Stable reason and exit-code mapping |
+| New-generation named `TimeSeries` and `EventSeries` | Validated | Media measurements and ordered evidence summaries |
+| `Tabular` interoperability | Validated | Typed internal evidence table with portable summary |
+| First-class `Video`, `Audio`, plots, and spectrograms | Validated | Color, motion, sound, pitch, and notebook visuals |
+| Wolfram neural-network repository resource | Validated locally | Pinned and hash-verified Whisper-V1 Tiny CPU inference |
+| Rich Mathematica notebook authoring | Validated | Eleven-section notebook with embedded graphics and package-backed rerun cell |
+| `ModelFit`/`ModelFitReport`, semantic retrieval, LLM graphs, MCP, standalone applications, AI Assistant | Not implemented | Separately gated future experiments |
+
+The Whisper cache command is intentionally the only network-enabled step. The
+validated analysis result identifies the resource UUID, version, size, three
+component hashes, CPU target, greedy sampling, and disabled network mode.
+
+## Used in the Babelapha prototype
 
 ### Typed time and event series
 
@@ -32,21 +52,20 @@ This maps naturally to two Babelapha datasets:
 - pipeline events indexed by execution time, such as task attempts, decisions,
   retries, delivery receipts, and artifact publication.
 
-Use `TimeSeriesSummary`, `TimeSeriesEvents`, `EventSeriesLookup`, and explicit
-component keys to build the first audio/provenance diagnostic. Export only
-plain JSON measurements and portable graphics; the Wolfram series objects are
-an internal computation model.
+The package builds named media `TimeSeries` values and an evidence
+`EventSeries`; the result exports only plain JSON measurements and structural
+summaries. Additional Version 15 series operations remain opportunities, not
+claims about the current output.
 
 ### Tabular and categorical data
 
 `Tabular` arrived in Version 14.2 and Version 15 added richer summaries,
 conversions, categorical values, and integration with time/event series.
 
-Use it to normalize evidence-bundle records into typed columns for task ID,
-stage, attempt, status, reason code, duration, artifact count, integrity state,
-and delivery state. Represent closed vocabularies such as task status and
-delivery state as `Nominal` values. Preserve unknown or future values as
-validation failures rather than silently recoding them.
+The v2 package converts the local evidence events into a `Tabular` value and
+exports its row/column summary. Richer pipeline evidence columns and categorical
+modeling remain follow-on work. Preserve unknown or future values as validation
+failures rather than silently recoding them.
 
 This is a better fit than converting canonical evidence into an untyped list
 of arbitrary associations, but the evidence bundle remains the source of
@@ -71,7 +90,7 @@ Version 15's `PackageInitialize` supports the Structured Package Format, and
 the new exception framework provides `CatchExceptions`, `ThrowException`, and
 registered exception types.
 
-Use these features from the start of the prototype:
+The prototype uses these features to:
 
 - split input validation, evidence adaptation, media analysis, result export,
   and error mapping into testable package files;
@@ -87,12 +106,10 @@ pilot document.
 ### Notebook and Markdown interoperability
 
 Recent releases support notebook-to-Markdown export, and Version 15 expands
-Markdown, Jupyter notebook, and Visual Studio notebook interchange. Use
-Markdown export to make an analysis reviewable in Git without requiring every
-reviewer to own Mathematica.
-
-The exported Markdown is a review artifact, not a canonical result. Generated
-assets must still be listed and hashed in `result.json`.
+Markdown, Jupyter notebook, and Visual Studio notebook interchange. The current
+lab does **not** claim notebook-to-Markdown conversion: Wolfram directly emits
+a portable Markdown report and a separate rich `.nb` notebook. Both are review
+artifacts listed and hashed in `result.json`.
 
 ## Use in later, separately gated experiments
 
@@ -101,11 +118,11 @@ assets must still be listed and hashed in `result.json`.
 Recent 14.x releases added or improved `VideoSummaryPlot`, direct audio
 operations on video, `VideoTranscribe`, `VideoStabilize`, point-based
 `VideoObjectTracking`, feature tracking, frame-wise filters, classification,
-and clustering.
-
-Use them for sampled-frame and interview-quality investigations after the
-audio pilot. Do not use Wolfram video export to replace Babelapha's FFmpeg
-rendition path.
+and clustering. V2 validates `VideoSummaryPlot`, direct video/audio handling,
+and its own sampled-frame color/motion analysis. It does not yet claim
+`VideoTranscribe`, stabilization, object tracking, classification, or
+clustering. Wolfram video export does not replace Babelapha's FFmpeg rendition
+path.
 
 ### Semantic retrieval and LLM graphs
 
@@ -113,10 +130,11 @@ Versions 14.1–14.3 added vector-database infrastructure, `SemanticSearch`,
 semantic reranking, sentence feature extraction, and `LLMGraph`.
 
 These could support transcript discovery and multi-step research workflows,
-but only after Babelapha has canonical transcript artifacts. Each embedding
-model, vector index, reranker, prompt, provider, and response must be treated
-as a versioned dependency or artifact. External LLM output must never be
-presented as deterministic evidence.
+but only after the v2 transcript path has representative accuracy evaluation
+and a reviewed canonical-sidecar lifecycle. Each embedding model, vector index,
+reranker, prompt, provider, and response must be treated as a versioned
+dependency or artifact. External LLM output must never be presented as
+deterministic evidence.
 
 ### Wolfram MCP
 

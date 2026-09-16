@@ -9,6 +9,7 @@ media lab is the foundation; Python remains only the independent trust boundary.
 ```mermaid
 flowchart LR
     V[Local source video] --> M[Wolfram Video and Audio]
+    S[Verified sidecar or cached Whisper] --> X
     E[Verified source events] --> D[EventSeries and Tabular]
     M --> T[Named TimeSeries]
     D --> X[Cross-domain Mathematica analysis]
@@ -21,46 +22,61 @@ flowchart LR
 
 ## Foundation — implemented and verified
 
-The current branch now provides:
+The current v2 branch now provides:
 
-- the `Local-prototype/{ingest,artefacts,output,logs,work}` workspace;
+- the `Local-prototype/{ingest,transcripts,models,artefacts,output,logs,work}`
+  workspace;
 - one-command local execution through
   `scripts/Invoke-MathematicaLocalPrototype.ps1`;
 - explicit discovery and recording of an exact Wolfram Language 15+ kernel;
 - a Structured Package Format package with registered typed exceptions;
 - direct Wolfram `Video` and `Audio` import and analysis;
-- frame/color/motion, loudness, interval, and spectral measurements;
+- per-frame color/palette, motion, histogram-distance, and scene-candidate
+  measurements;
+- dynamics, RMS/peak/loudness, spectral centroid/spread, zero-crossing,
+  spectrogram, interval, and fundamental-frequency analysis;
+- hash-bound `.txt`, `.srt`, and `.vtt` sidecars plus verified local
+  Whisper-V1 Tiny CPU transcription with an explicit cache step;
+- transcript statistics and timestamped segments aligned with visual and sound
+  measurements on a shared time axis;
 - named `TimeSeries`, provenance `EventSeries`, and `Tabular` representations;
-- seven hashed Wolfram outputs, including HTML/Markdown reports and a notebook;
+- seven hashed Wolfram outputs, including HTML/Markdown reports and a rich
+  eleven-section notebook;
 - strict Python input/evidence preparation and output canonicalization only;
-- independent package-hash binding and an optional two-run repeatability gate;
-- Wolfram unit tests, Python boundary tests, repeatable audio/video execution,
-  and a successful no-audio fallback run on Engine 15.0.0 for Windows x86-64.
+- v2 source/input/result schemas, independent package-hash binding, and an
+  optional two-run repeatability gate;
+- Wolfram unit tests, Python boundary tests, a validated v2 media/Whisper run,
+  and historical v1 repeatability/no-audio fallback evidence on Engine 15.0.0
+  for Windows x86-64.
 
 ## Next — deepen local Mathematica use
 
 Add experiments as separate, versioned analyses rather than optional switches
 inside the existing result contract.
 
-1. **Video dynamics:** extend sampled-frame analysis with feature tracking,
-   stabilization diagnostics, scene/shot structure, richer motion fields, and
-   comparative visual summaries.
-2. **Audio structure:** add frequency-band energy, pitch/harmonic analysis,
-   transient and silence segmentation, channel comparisons, and interactive
-   interval inspection in the notebook.
-3. **Cross-modal alignment:** align frame and audio measurements on shared time
-   axes and use Wolfram temporal objects to identify correlated changes.
-4. **Statistical explanation:** use symbolic/statistical models and
+1. **Video dynamics:** compare the implemented sampled-frame scene signal with
+   feature tracking, stabilization diagnostics, shot-boundary ground truth,
+   and richer motion fields before promoting another method.
+2. **Audio structure:** build on the implemented pitch/spectral diagnostics
+   with frequency-band energy, harmonic confidence, transient segmentation,
+   channel comparisons, and interactive interval drill-down.
+3. **Cross-modal explanation:** move beyond the implemented shared timeline to
+   explicitly tested correlations and candidate events, while preserving each
+   source measurement and its limitations.
+4. **Transcript quality:** establish representative interview-language test
+   sets, word-error measures, human corrections, and a canonical reviewed
+   sidecar lifecycle before relying on speech text downstream.
+5. **Statistical explanation:** use symbolic/statistical models and
    `ModelFitReport` where they improve interpretation, while recording model
    definitions and producing portable coefficient/diagnostic summaries.
-5. **Provenance exploration:** turn richer local evidence into graph and
+6. **Provenance exploration:** turn richer local evidence into graph and
    temporal views without replacing canonical source/evidence JSON.
-6. **Notebook research surface:** make the generated notebook the inspectable
-   local lab for drilling into measurements and rerunning the shared package;
-   production calculations must stay in package code.
-7. **Transcript/text research:** only after a canonical local transcript exists,
-   evaluate temporal alignment, entity/text analysis, and semantic retrieval as
-   explicitly identified processors.
+7. **Notebook interaction:** extend the implemented review notebook with
+   package-backed interval selection and comparisons; production calculations
+   must stay in package code.
+8. **Text research:** after reviewed transcript artifacts exist, evaluate
+   entity/text analysis and semantic retrieval as explicitly identified
+   processors.
 
 Every experiment must identify its input bytes, exact kernel and package hash,
 parameters, outputs, and capabilities used. Cloud functions, implicit model

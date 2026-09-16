@@ -23,7 +23,17 @@ or materially more capable while remaining reproducible and operable.
 | Hiring and maintenance | Specialized Wolfram knowledge | Existing project language and broad ecosystem | Python wins for long-lived routine stages |
 | Portable outputs | JSON, CSV, PNG, SVG are available | Same | Tie if Wolfram expressions and notebooks are not the only result |
 
-## Baseline implementations for the pilot
+## Current evidence
+
+The v2 Wolfram lab has crossed the local feasibility gate: it produced strict
+portable JSON, seven hash-verified artifacts, a rich notebook, extended
+color/motion/sound/pitch/spectral measurements, and a local verified Whisper
+transcript with network mode disabled. Python currently supplies the contract
+and integrity boundary only; this is not yet a controlled performance or
+accuracy win over an equivalent Python analysis. Production adoption still
+requires the side-by-side scorecard below.
+
+## Baseline implementations for further comparison
 
 The comparison should use equivalent intent, not artificially weak Python:
 

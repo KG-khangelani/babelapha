@@ -1,7 +1,7 @@
 # Annotated sources
 
 Sources were reviewed on 2026-09-16. Product behavior and licensing can change;
-recheck them when the pilot starts and before a production decision.
+recheck them before a new runtime upgrade or production decision.
 
 ## Current release and recent features
 
@@ -24,7 +24,7 @@ recheck them when the pilot starts and before a production decision.
   later read-only experiment.
 - [Standalone Applications](https://reference.wolfram.com/language/StandaloneApplications/)
   — runtime embedding, pruning, and license signatures; a later commercial
-  packaging option rather than the first pilot runtime.
+  packaging option, not the implemented local runtime.
 - [Version 14.3 video update history](https://reference.wolfram.com/language/guide/VideoComputation-UpdateHistory.html)
   — stabilization, feature tracking, point-based object tracking, and
   frame-wise video functions relevant to later media research.
@@ -92,6 +92,13 @@ recheck them when the pilot starts and before a production decision.
 
 ## Babelapha sources of truth
 
+- [`../../contracts/mathematica-local-analysis-input-v2.schema.json`](../../contracts/mathematica-local-analysis-input-v2.schema.json),
+  [`../../contracts/mathematica-local-analysis-result-v2.schema.json`](../../contracts/mathematica-local-analysis-result-v2.schema.json),
+  and [`../../contracts/mathematica-local-source-evidence-v2.schema.json`](../../contracts/mathematica-local-source-evidence-v2.schema.json)
+  — current local media-lab wire contracts.
+- [`../../prototype/mathematica/BabelaphaAnalysis/Kernel/init.wl`](../../prototype/mathematica/BabelaphaAnalysis/Kernel/init.wl)
+  — current Wolfram package entry point; package files and tests determine what
+  is actually implemented.
 - [`../pipeline-transparency.md`](../pipeline-transparency.md) — immutable stage
   manifests, evidence bundles, artifact identity, and final provenance gates.
 - [`../../contracts/provenance-manifest-v1.schema.json`](../../contracts/provenance-manifest-v1.schema.json)

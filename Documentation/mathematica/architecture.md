@@ -10,6 +10,8 @@ its inputs and outputs. Airflow and MinIO are not involved in this path.
 flowchart LR
     subgraph Workspace[Local-prototype]
         I[ingest: one video]
+        T[transcripts: optional sidecar]
+        M[models: reserved manifests or exports]
         E[artefacts: evidence input runtime]
         O[output: results reports notebook]
         L[logs]
@@ -17,11 +19,15 @@ flowchart LR
     end
 
     I --> PB[Python prepare boundary]
+    T --> PB
     PB --> E
     E --> PS[PowerShell launcher]
     PS --> WT[Wolfram tests]
     WT --> WL[Version 15 SPF package]
     I --> WL
+    T --> WL
+    M -. optional workspace manifests .-> WL
+    C[Wolfram local object store] -. verified Whisper cache .-> WL
     WL --> O
     O --> VB[Python validation boundary]
     VB --> O
@@ -40,8 +46,8 @@ the architecture does not assume a particular patch version.
 | Component | Owns | Does not own |
 |---|---|---|
 | PowerShell launcher | Runtime discovery, exact kernel selection, ordering, logs, completion checks | Media calculations or result interpretation |
-| Python boundary | Byte identity, local evidence, strict JSON, safe paths, artifact rehashing, canonicalization | Audio/video measurements, plots, reports, or notebook calculations |
-| Wolfram package | Video/audio import, analysis, `TimeSeries`, `EventSeries`, `Tabular`, visualization, reports, notebook | Canonical JSON trust decision or remote publication |
+| Python boundary | Source/sidecar byte identity, local evidence, strict v2 JSON, safe paths, artifact rehashing, canonicalization | Media/transcript measurements, plots, reports, or notebook calculations |
+| Wolfram package | Video/audio import, media and transcript analysis, `TimeSeries`, `EventSeries`, `Tabular`, visualization, reports, notebook | Canonical JSON trust decision, implicit model acquisition, or remote publication |
 
 This split ensures that every human-facing analytical artifact is genuinely
 produced by Mathematica while portable identity and contract enforcement do
@@ -52,22 +58,29 @@ not depend on trusting Mathematica's serialization alone.
 ```mermaid
 flowchart TB
     V[Wolfram Video] --> F[Uniform frame sampling]
-    F --> B[Brightness color motion]
+    F --> B[Color palette and frame metrics]
+    F --> MO[Motion and scene candidates]
     F --> CS[Contact sheet]
     V --> VS[VideoSummaryPlot]
     V --> A[Wolfram Audio]
-    A --> AM[AudioMeasurements]
-    A --> AL[AudioLocalMeasurements]
+    A --> AM[AudioMeasurements and intervals]
+    A --> AL[Dynamics spectrum pitch]
     A --> AI[AudioIntervals]
     AL --> TS[Named TimeSeries]
+    A --> TR{Transcript source}
+    SC[Verified sidecar] --> TR
+    WM[Verified cached Whisper Tiny] --> TR
+    TR --> TX[Text segments and statistics]
     E[Verified local events] --> ES[EventSeries]
     E --> TB[Tabular]
     B --> J[Portable measurement summary]
+    MO --> J
     AM --> J
     AI --> J
     TS --> J
     ES --> J
     TB --> J
+    TX --> J
     J --> R[Reports plots and notebook]
 ```
 
@@ -80,6 +93,8 @@ notebook preserves a native Mathematica review experience.
 ```text
 Local-prototype/
   ingest/<one-video>
+  transcripts/<optional-matching-sidecar>
+  models/
   artefacts/source-evidence.json
   artefacts/analysis-input.json
   artefacts/runtime.json
@@ -102,15 +117,25 @@ limited to the runtime record and launcher output.
 
 ## Trust and failure boundaries
 
-The prepare boundary hashes the user-selected source and creates a canonical
-local evidence document. It also computes the complete Wolfram package hash
-and binds it into both the analysis input and deterministic run ID. Mathematica
-independently recomputes that package identity and verifies source byte size,
-source SHA-256, evidence SHA-256, and evidence/source identity before opening
-the video. The validation boundary permits no undeclared result fields or
-outputs, recomputes the current package hash, and recomputes every declared
-output identity. Preparing a new valid run removes prior canonical/raw result
-markers so a failed rerun cannot look successful.
+The prepare boundary hashes the user-selected source and any selected
+transcript sidecar and creates a canonical local evidence document. It also
+computes the complete Wolfram package hash and binds source, sidecar,
+parameters, package, and analysis identity into the deterministic run ID.
+Mathematica independently recomputes the package identity and verifies source,
+evidence, and sidecar byte identities before opening media. The validation
+boundary permits no undeclared result fields or outputs, checks method-specific
+transcript provenance, recomputes the current package hash, verifies the
+eleven-section notebook structure, and recomputes every declared output
+identity. Preparing a new valid run removes prior canonical/raw result markers
+so a failed rerun cannot look successful.
+
+Whisper acquisition is intentionally outside the analysis path. The explicit
+cache command temporarily permits internet access, resolves the pinned
+`Whisper-V1 Nets` resource (`5211d691-293f-417d-a19f-f1e5faef3fb7`, version
+`1.0.0`, size `Tiny`), then verifies encoder, decoder, and labels bytes. The
+analysis path sets `$AllowInternet = False`; a missing or mismatched model is a
+reported unavailable capability, never an implicit download. The validated v2
+reference result records CPU inference and `network_mode: disabled`.
 
 The package uses Structured Package Format and typed exceptions so callers can
 distinguish usage, invalid input, integrity, dependency, and analysis/export
