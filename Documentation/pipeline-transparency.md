@@ -43,6 +43,15 @@ Every record carries:
 - repository commit, exact DAG-file and complete DAG-bundle SHA-256 values,
   configured image, and container digest when available.
 
+Tasks that produce processor-specific evidence may return a
+`provenance_parameters` object in their XCom payload. Its strict JSON values
+are merged into `execution.parameters` and therefore copied into the canonical
+OpenLineage execution facet. Task values cannot replace the reserved
+`object_id`, `filename`, `pachyderm_commit`, `dag_code_bundle_sha256`,
+`git_identity_status`, or `pipeline_task_contract` facts owned by the
+orchestrator. Invalid values, non-string object keys, NaN/infinity, and
+reserved-key collisions are rejected rather than silently normalized.
+
 `reports/<object-id>/*.json` files are mutable operational summaries retained
 for compatibility. They are not the provenance source of truth.
 

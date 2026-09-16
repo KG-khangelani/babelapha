@@ -508,6 +508,75 @@ class ProvenanceContractTests(unittest.TestCase):
             ):
                 provenance.build_airflow_manifest(context, "FAILED")
 
+    def test_task_supplied_provenance_parameters_are_preserved_without_overriding_run_facts(self):
+        payload = {
+            "object_id": "interview-042",
+            "filename": "interview.mp4",
+            "provenance_parameters": {
+                "analysis_id": "audio-provenance-diagnostic-v1",
+                "processor": {
+                    "name": "wolfram",
+                    "kernel_version": "15.0.1",
+                    "system_id": "Windows-x86-64",
+                    "package_sha256": "f" * 64,
+                    "network_mode": "offline",
+                },
+            },
+        }
+
+        class TaskInstance:
+            task_id = "run_wolfram_analysis"
+            dag_id = "analyze_media_wolfram"
+            try_number = 1
+            start_date = datetime(2026, 9, 16, tzinfo=timezone.utc)
+            end_date = datetime(2026, 9, 16, 0, 0, 1, tzinfo=timezone.utc)
+            log_url = "http://airflow.example/log"
+
+            @staticmethod
+            def xcom_pull(**_kwargs):
+                return payload
+
+        context = {
+            "task_instance": TaskInstance(),
+            "task": SimpleNamespace(
+                task_id="run_wolfram_analysis",
+                dag_id="analyze_media_wolfram",
+            ),
+            "dag_run": SimpleNamespace(
+                run_id="manual__wolfram-analysis",
+                conf={"id": "interview-042", "filename": "interview.mp4"},
+            ),
+        }
+        record = provenance.build_airflow_manifest(context, "SUCCEEDED")
+        parameters = record["execution"]["parameters"]
+
+        self.assertEqual(parameters["object_id"], "interview-042")
+        self.assertEqual(parameters["analysis_id"], "audio-provenance-diagnostic-v1")
+        self.assertEqual(parameters["processor"], payload["provenance_parameters"]["processor"])
+
+        payload["provenance_parameters"] = {"object_id": "replacement"}
+        with self.assertRaisesRegex(
+            provenance.ManifestValidationError,
+            "cannot override reserved fields: object_id",
+        ):
+            provenance.build_airflow_manifest(context, "SUCCEEDED")
+
+    def test_task_supplied_provenance_parameters_require_unambiguous_json_values(self):
+        standard = {"object_id": "interview-042"}
+        invalid_values = (
+            ["not", "an", "object"],
+            {"metric": float("nan")},
+            {1: "non-string-key"},
+            {"unsupported": datetime(2026, 9, 16, tzinfo=timezone.utc)},
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaises(provenance.ManifestValidationError):
+                    provenance._execution_parameters(
+                        {"provenance_parameters": value},
+                        standard,
+                    )
+
     def test_openlineage_event_reuses_manifest_identity_and_artifacts(self):
         item = provenance.artifact(
             "s3://pachyderm/output/interview-042/hls/playlist.m3u8",

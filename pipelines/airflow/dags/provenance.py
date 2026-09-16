@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -97,6 +98,16 @@ PIPELINE_TASK_CONTRACTS = {
     ),
 }
 PIPELINE_TASK_CONTRACT_VERSION = "1.0.0"
+RESERVED_EXECUTION_PARAMETER_KEYS = frozenset(
+    {
+        "object_id",
+        "filename",
+        "pachyderm_commit",
+        "dag_code_bundle_sha256",
+        "git_identity_status",
+        "pipeline_task_contract",
+    }
+)
 
 
 class ManifestValidationError(ValueError):
@@ -1292,6 +1303,45 @@ def _task_payload(context: dict) -> dict:
     return {}
 
 
+def _validate_json_parameter(value: object, path: str = "provenance_parameters") -> None:
+    """Reject values whose canonical JSON identity would be ambiguous or invalid."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ManifestValidationError(f"{path} must not contain NaN or infinity")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_parameter(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or not key:
+                raise ManifestValidationError(f"{path} object keys must be non-empty strings")
+            _validate_json_parameter(item, f"{path}.{key}")
+        return
+    raise ManifestValidationError(
+        f"{path} contains unsupported value type {type(value).__name__}"
+    )
+
+
+def _execution_parameters(payload: dict, standard: dict) -> dict:
+    """Merge task evidence without allowing it to replace orchestrator facts."""
+    supplied = payload.get("provenance_parameters")
+    if supplied is None:
+        return standard
+    if not isinstance(supplied, dict):
+        raise ManifestValidationError("provenance_parameters must be an object")
+    conflicts = sorted(RESERVED_EXECUTION_PARAMETER_KEYS.intersection(supplied))
+    if conflicts:
+        raise ManifestValidationError(
+            "provenance_parameters cannot override reserved fields: " + ", ".join(conflicts)
+        )
+    _validate_json_parameter(supplied)
+    return {**standard, **supplied}
+
+
 def build_airflow_manifest(context: dict, status: str) -> dict:
     """Translate an Airflow callback context into the canonical manifest."""
     ti = context.get("task_instance") or context.get("ti")
@@ -1353,6 +1403,18 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
             )
         ]
     manifest_outputs = payload.get("provenance_outputs") or [] if status == "SUCCEEDED" else []
+    standard_parameters = {
+        "object_id": object_id,
+        "filename": filename,
+        "pachyderm_commit": pachyderm_commit,
+        "dag_code_bundle_sha256": code_bundle["bundle_sha256"],
+        "git_identity_status": git_identity_status,
+        **(
+            {"pipeline_task_contract": pipeline_task_contract(dag_id)}
+            if dag_id in PIPELINE_TASK_CONTRACTS
+            else {}
+        ),
+    }
     return build_manifest(
         object_id=object_id,
         filename=filename,
@@ -1373,18 +1435,7 @@ def build_airflow_manifest(context: dict, status: str) -> dict:
         code_sha256=code_sha,
         container_image=image,
         container_digest=digest,
-        parameters={
-            "object_id": object_id,
-            "filename": filename,
-            "pachyderm_commit": pachyderm_commit,
-            "dag_code_bundle_sha256": code_bundle["bundle_sha256"],
-            "git_identity_status": git_identity_status,
-            **(
-                {"pipeline_task_contract": pipeline_task_contract(dag_id)}
-                if dag_id in PIPELINE_TASK_CONTRACTS
-                else {}
-            ),
-        },
+        parameters=_execution_parameters(payload, standard_parameters),
         airflow_version=_package_version("apache-airflow"),
         airflow_log_url=getattr(ti, "log_url", None),
         bucket=bucket,
