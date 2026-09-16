@@ -2,6 +2,8 @@ PackageScoped[analyzeTranscript]
 PackageScoped[analyzeTranscriptWithWhisper]
 PackageScoped[analyzeTranscriptSidecar]
 PackageScoped[whisperTranscriptModelIdentity]
+PackageScoped[transcriptAudioChunks]
+PackageScoped[transcriptEffectiveDuration]
 
 $whisperTranscriptResourceName = "Whisper-V1 Nets";
 $whisperTranscriptResourceUUID = "5211d691-293f-417d-a19f-f1e5faef3fb7";
@@ -139,7 +141,8 @@ transcriptGreedyToken[probabilities_, suppressed_List] := Module[{scores},
 
 transcriptDecodeWhisperChunk[features_, decoder_, maxIterations_Integer] := Module[
     {eosCode = 50257, sosCode = 50258, noTimestampsCode = 50363, index = 1,
-     initialStates, outputPorts, state, networkOutput, token, tokens = {}},
+     initialStates, outputPorts, prompt, state, networkOutput, token,
+     isGenerating, nextInput, tokens = {}},
     initialStates = AssociationMap[
         Function[name, {}],
         Select[Information[decoder, "InputPortNames"], StringStartsQ["State"]]
@@ -148,23 +151,24 @@ transcriptDecodeWhisperChunk[features_, decoder_, maxIterations_Integer] := Modu
         NetPort /@ Information[decoder, "OutputPortNames"],
         NetPort[{"softmax", "Output"}]
     ];
-    state = Join[<|"Index" -> index, "Input1" -> sosCode, "Input2" -> features|>, initialStates];
+    prompt = {sosCode, noTimestampsCode};
+    state = Join[<|"Index" -> index, "Input1" -> First[prompt], "Input2" -> features|>, initialStates];
     Do[
+        isGenerating = index >= Length[prompt];
         networkOutput = decoder[state, outputPorts, TargetDevice -> "CPU"];
-        token = transcriptGreedyToken[
-            networkOutput[NetPort[{"softmax", "Output"}]],
-            {noTimestampsCode}
-        ];
-        If[token === eosCode, Break[]];
-        AppendTo[tokens, token];
+        token = transcriptGreedyToken[networkOutput[NetPort[{"softmax", "Output"}]], {}];
+        If[isGenerating && token === eosCode, Break[]];
+        If[isGenerating, AppendTo[tokens, token]];
+        index++;
+        nextInput = If[index <= Length[prompt], prompt[[index]], token];
         state = Join[
             KeyMap[
                 StringReplace["OutState" -> "State"],
                 KeyDrop[networkOutput, NetPort[{"softmax", "Output"}]]
             ],
-            <|"Index" -> ++index, "Input1" -> token, "Input2" -> features|>
+            <|"Index" -> index, "Input1" -> nextInput, "Input2" -> features|>
         ],
-        {maxIterations}
+        {maxIterations + Length[prompt]}
     ];
     tokens
 ];
@@ -246,9 +250,24 @@ transcriptUnavailable[method_String, reason_String, model_: Null] := <|
     "inference" -> Null
 |>;
 
-analyzeTranscriptWithWhisper[audio_?AudioQ] := Block[{$AllowInternet = False}, Module[
+transcriptAudioChunks[audio_Audio, duration_?NumericQ, chunkSeconds_?NumericQ] := Module[
+    {starts, intervals, chunks},
+    If[duration <= 0. || chunkSeconds <= 0., Return[$Failed]];
+    If[duration <= chunkSeconds, Return[{audio}]];
+    starts = Range[0., Max[0., N[duration] - 10.^-9], N[chunkSeconds]];
+    intervals = ({#, Min[N[duration], # + N[chunkSeconds]]} &) /@ starts;
+    chunks = Quiet@Check[AudioTrim[audio, #] & /@ intervals, $Failed];
+    If[ListQ[chunks] && chunks =!= {} && AllTrue[chunks, AudioQ], chunks, $Failed]
+];
+
+transcriptEffectiveDuration[audioDuration_?NumericQ, maximumDuration_] := Which[
+    NumericQ[maximumDuration] && maximumDuration > 0., N@Min[audioDuration, maximumDuration],
+    True, N[audioDuration]
+];
+
+analyzeTranscriptWithWhisper[audio_?AudioQ, maximumDuration_: Automatic] := Block[{$AllowInternet = False}, Module[
     {model, encoder, decoder, labels, chunks, features, tokenChunks, labelChunks,
-     audioDuration, chunkDurations, segments, text, result},
+     audioDuration, effectiveDuration, chunkDurations, segments, text, result},
     model = whisperTranscriptModelIdentity[];
     If[Lookup[model, "status", ""] =!= "VERIFIED",
         Return@transcriptUnavailable[
@@ -262,11 +281,19 @@ analyzeTranscriptWithWhisper[audio_?AudioQ] := Block[{$AllowInternet = False}, M
         decoder = NetModel[{$whisperTranscriptResourceName, "Size" -> $whisperTranscriptModelSize, "Part" -> "TextDecoder"}];
         labels = NetModel[$whisperTranscriptResourceName, "Labels"];
         audioDuration = N@QuantityMagnitude@UnitConvert[Duration[audio], "Seconds"];
-        chunks = AudioPartition[audio, 30];
+        effectiveDuration = transcriptEffectiveDuration[audioDuration, maximumDuration];
+        chunks = transcriptAudioChunks[audio, audioDuration, 30.];
+        If[chunks === $Failed,
+            Return@transcriptUnavailable[
+                "wolfram_whisper_v1_tiny",
+                "The local audio stream could not be divided into deterministic inference chunks.",
+                model
+            ]
+        ];
         features = encoder[chunks, TargetDevice -> "CPU"];
         tokenChunks = transcriptDecodeWhisperChunk[#, decoder, 224] & /@ features;
         labelChunks = (labels[[#]] &) /@ tokenChunks;
-        chunkDurations = Table[Min[30., Max[0., audioDuration - 30. (index - 1)]], {index, Length[labelChunks]}];
+        chunkDurations = Table[Min[30., Max[0., effectiveDuration - 30. (index - 1)]], {index, Length[labelChunks]}];
         segments = Flatten@MapThread[
             transcriptSegmentsFromLabels[#1, 30. (#3 - 1), #2] &,
             {labelChunks, chunkDurations, Range[Length[labelChunks]]}
@@ -275,13 +302,20 @@ analyzeTranscriptWithWhisper[audio_?AudioQ] := Block[{$AllowInternet = False}, M
             Select[#, ! transcriptSpecialTokenQ[#] &] &,
             labelChunks
         ];
+        If[text === "",
+            Return@transcriptUnavailable[
+                "wolfram_whisper_v1_tiny",
+                "The verified local model completed inference but returned no speech text.",
+                model
+            ]
+        ];
         <|
-            "status" -> If[text === "", "UNAVAILABLE", "AVAILABLE"],
-            "reason" -> If[text === "", "The local model returned no speech text.", ""],
+            "status" -> "AVAILABLE",
+            "reason" -> "",
             "method" -> "wolfram_whisper_v1_tiny",
             "text" -> text,
             "segments" -> segments,
-            "statistics" -> transcriptStatistics[text, segments, audioDuration],
+            "statistics" -> transcriptStatistics[text, segments, effectiveDuration],
             "model" -> model,
             "sidecar" -> Null,
             "inference" -> <|
@@ -306,7 +340,7 @@ analyzeTranscriptWithWhisper[audio_?AudioQ] := Block[{$AllowInternet = False}, M
     ]
 ]];
 
-analyzeTranscriptWithWhisper[_] := transcriptUnavailable[
+analyzeTranscriptWithWhisper[_, ___] := transcriptUnavailable[
     "wolfram_whisper_v1_tiny",
     "No decodable audio track was provided for automatic transcription.",
     whisperTranscriptModelIdentity[]
@@ -412,9 +446,9 @@ analyzeTranscript[audio_, config_Association] := Module[
         "auto" | "prefer_sidecar",
             If[StringQ[sidecarPath] && FileExistsQ[sidecarPath],
                 analyzeTranscriptSidecar[sidecarPath, duration],
-                analyzeTranscriptWithWhisper[audio]
+                analyzeTranscriptWithWhisper[audio, duration]
             ],
-        "automatic" | "whisper", analyzeTranscriptWithWhisper[audio],
+        "automatic" | "whisper", analyzeTranscriptWithWhisper[audio, duration],
         _, transcriptUnavailable["configuration", "Unknown transcript analysis mode: " <> mode]
     ]
 ];

@@ -211,3 +211,20 @@ VerificationTest[
     {1, 2, 3, 2},
     TestID -> "scene-and-cross-modal-events-are-derived"
 ]
+
+VerificationTest[
+    Module[{audio, chunks},
+        audio = Audio[ConstantArray[0., 8000], SampleRate -> 8000];
+        chunks = BabelaphaAnalysis`PackageScope`transcriptAudioChunks[audio, 1., 30.];
+        ListQ[chunks] && Length[chunks] == 1 && SameQ[First[chunks], audio]
+    ],
+    True,
+    TestID -> "short-transcript-audio-does-not-require-padding"
+]
+
+VerificationTest[
+    BabelaphaAnalysis`PackageScope`transcriptEffectiveDuration[10.0266666667, 10.006],
+    10.006,
+    SameTest -> (Abs[#1 - #2] < 10.^-9 &),
+    TestID -> "transcript-duration-is-bounded-by-canonical-media-duration"
+]
