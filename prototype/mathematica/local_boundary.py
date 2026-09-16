@@ -2799,6 +2799,8 @@ def _validate_outputs(
     notebook_bytes = notebook_path.read_bytes()
     required_notebook_sections = (
         b"Executive overview",
+        b"What this run shows",
+        b"Linked media explorer",
         b"Video storyboard",
         b"Color analysis",
         b"Motion and temporal structure",
@@ -2826,14 +2828,14 @@ def _validate_outputs(
         )
     audio_interactive = capabilities["audio_track"]["status"] == "USED"
     transcript_interactive = isinstance(transcript, dict) and transcript.get("status") == "AVAILABLE"
-    required_dynamic_modules = 3 + int(audio_interactive) + int(transcript_interactive)
-    required_sliders = 2 + int(audio_interactive)
     if (
-        notebook_bytes.count(b"DynamicModuleBox[") < required_dynamic_modules
-        or notebook_bytes.count(b"SliderBox[") < required_sliders
+        notebook_bytes.count(b"DynamicModuleBox[") < 1
+        or notebook_bytes.count(b"SliderBox[") < 1
+        or b"Shared media time" not in notebook_bytes
+        or b"Nearest frame time" not in notebook_bytes
     ):
         raise ResultContractError(
-            "analysis-notebook.nb must contain native interactive Mathematica controls"
+            "analysis-notebook.nb must contain one linked native Mathematica media cursor"
         )
     if b"AnimatorBox[" not in notebook_bytes:
         raise ResultContractError(

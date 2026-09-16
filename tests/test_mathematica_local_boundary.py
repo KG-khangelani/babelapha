@@ -86,6 +86,8 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
             if name == "analysis-notebook.nb":
                 sections = [
                     "Executive overview",
+                    "What this run shows",
+                    "Linked media explorer",
                     "Video storyboard",
                     "Color analysis",
                     "Motion and temporal structure",
@@ -102,12 +104,14 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                     + "\n".join(sections)
                     + "\n"
                     + "GraphicsBox[{}]\n" * 5
-                    + "DynamicModuleBox[{}]\n" * 5
-                    + "SliderBox[{}]\n" * 3
-                    + "PopupMenuBox[{}]\n"
+                    + "DynamicModuleBox[{}]\n"
+                    + "SliderBox[{}]\n"
+                    + "PopupMenuBox[{}]\n" * 2
                     + "AnimatorBox[{}]\n"
                     + "InputFieldBox[{}]\n"
                     + 'ButtonBox["Load local video"]\n'
+                    + "Shared media time\n"
+                    + "Nearest frame time\n"
                     + "InitializationCell -> True\n"
                     + 'StyleDefinitions -> "Default.nb"\n'
                     + "UNAVAILABLE\n"
@@ -813,7 +817,7 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
 
     def test_validate_rejects_a_static_or_custom_styled_notebook(self):
         cases = (
-            (b"DynamicModuleBox[", b"StaticModuleBox[", "native interactive"),
+            (b"DynamicModuleBox[", b"StaticModuleBox[", "linked native"),
             (b'StyleDefinitions -> "Default.nb"', b'StyleDefinitions -> "Custom.nb"', "default notebook styles"),
             (b"wolfram_whisper_v1_tiny", b"missing_transcript_method", "actual transcript method"),
         )

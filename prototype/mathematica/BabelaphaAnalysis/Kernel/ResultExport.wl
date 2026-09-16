@@ -865,6 +865,261 @@ notebookTimelineExplorer[graphic_, duration_, transcriptSegments_List] := Module
     ]
 ];
 
+notebookLinkedMediaExplorer[sourcePath_String, graphic_, frames_List, times_List, audioAnalysis_Association, duration_, speechSegments_List, sceneSegments_List, audioRegions_List, crossModal_Association] := Module[
+    {maximum, frameCount, audioSpecifications, hasAudioSeries, speechRecords,
+     sceneRecords, activityRecords, eventRecords, alignedSamples, jumpOptions},
+    maximum = If[notebookFiniteNumberQ[duration] && duration > 0, N[duration], 1.];
+    frameCount = Min[Length[frames], Length[times]];
+    audioSpecifications = Select[
+        {
+            {"RMS amplitude", notebookSeriesPairs[notebookLookup[audioAnalysis, "rms_series", None]]},
+            {"Peak amplitude", notebookSeriesPairs[notebookLookup[audioAnalysis, "peak_series", None]]},
+            {"Loudness", notebookSeriesPairs[notebookLookup[audioAnalysis, "loudness_series", None]]},
+            {"Spectral centroid", notebookSeriesPairs[notebookLookup[audioAnalysis, "centroid_series", None]]},
+            {"Spectral spread", notebookSeriesPairs[notebookLookup[audioAnalysis, "spectral_spread_series", None]]},
+            {"Zero-crossing rate", notebookSeriesPairs[notebookLookup[audioAnalysis, "zero_crossing_rate_series", None]]},
+            {"Fundamental frequency", notebookSeriesPairs[notebookLookup[audioAnalysis, "pitch_series", None]]}
+        },
+        Last[#] =!= {} &
+    ];
+    hasAudioSeries = audioSpecifications =!= {};
+    If[! hasAudioSeries, audioSpecifications = {{"No timestamped audio metric", {{0., 0.}}}}];
+    speechRecords = DeleteMissing@MapIndexed[
+        Function[{segment, position},
+            With[{bounds = notebookSegmentBounds[segment]},
+                If[
+                    MissingQ[bounds],
+                    Missing["NoBounds"],
+                    <|
+                        "start" -> First[bounds],
+                        "end" -> Last[bounds],
+                        "text" -> notebookLookup[segment, "text", ""],
+                        "index" -> notebookLookup[segment, "segment_index", First[position]],
+                        "timing_basis" -> notebookLookup[segment, "timing_basis", "SOURCE_SEGMENT"]
+                    |>
+                ]
+            ]
+        ],
+        Select[speechSegments, AssociationQ]
+    ];
+    sceneRecords = DeleteMissing@Map[
+        Function[segment,
+            With[{bounds = notebookSegmentBounds[segment]},
+                If[
+                    MissingQ[bounds],
+                    Missing["NoBounds"],
+                    Join[<|"start" -> First[bounds], "end" -> Last[bounds]|>, segment]
+                ]
+            ]
+        ],
+        Select[sceneSegments, AssociationQ]
+    ];
+    activityRecords = DeleteMissing@Map[
+        Function[region,
+            With[{bounds = notebookSegmentBounds[region]},
+                If[
+                    MissingQ[bounds],
+                    Missing["NoBounds"],
+                    Join[<|"start" -> First[bounds], "end" -> Last[bounds]|>, region]
+                ]
+            ]
+        ],
+        Select[audioRegions, AssociationQ]
+    ];
+    eventRecords = Select[
+        notebookLookup[crossModal, "events", {}],
+        AssociationQ[#] && notebookFiniteNumberQ[notebookLookup[#, "time_seconds", Null]] &
+    ];
+    alignedSamples = Select[
+        notebookLookup[crossModal, "aligned_samples", {}],
+        AssociationQ[#] && notebookFiniteNumberQ[notebookLookup[#, "time_seconds", Null]] &
+    ];
+    jumpOptions = DeleteDuplicatesBy[
+        Join[
+            {0. -> "Start"},
+            (notebookLookup[#, "start", 0.] -> ("Speech " <> ToString[notebookLookup[#, "index", "?"]])) & /@ speechRecords,
+            (notebookLookup[#, "start", 0.] -> ("Scene " <> ToString[notebookLookup[#, "scene_index", "?"]])) & /@ sceneRecords,
+            (notebookLookup[#, "time_seconds", 0.] -> ("Event " <> ToString[notebookLookup[#, "event_index", "?"]] <> ": " <> ToString[notebookLookup[#, "event_type", "event"]])) & /@ eventRecords
+        ],
+        First
+    ];
+    With[
+        {
+            localPath = sourcePath,
+            storedGraphic = graphic,
+            storedFrames = If[frameCount > 0, ExportByteArray[ImageResize[#, 480], "JPEG", IncludeMetaInformation -> None] & /@ Take[frames, frameCount], {}],
+            storedTimes = If[frameCount > 0, N@Take[times, frameCount], {}],
+            storedRGB = If[frameCount > 0, N[notebookFrameRGB /@ Take[frames, frameCount]], {}],
+            storedBrightness = If[frameCount > 0, N[notebookFrameBrightness /@ Take[frames, frameCount]], {}],
+            storedSeries = Association[Rule @@@ audioSpecifications],
+            metricNames = First /@ audioSpecifications,
+            audioSeriesAvailable = hasAudioSeries,
+            storedSpeech = speechRecords,
+            storedScenes = sceneRecords,
+            storedActivity = activityRecords,
+            storedEvents = eventRecords,
+            storedAligned = alignedSamples,
+            storedJumpOptions = jumpOptions,
+            mediaDuration = maximum
+        },
+        DynamicModule[
+            {cursor = 0., metric = First[metricNames], player = Null, jumpTarget = 0., query = ""},
+            Column[
+                {
+                    Row[
+                        {
+                            Button[
+                                "Load local video",
+                                player = Quiet@Check[If[FileExistsQ[localPath], Video[localPath, ImageSize -> Large], $Failed], $Failed],
+                                Method -> "Queued"
+                            ],
+                            Spacer[20],
+                            "Jump to: ",
+                            PopupMenu[
+                                Dynamic[
+                                    jumpTarget,
+                                    Function[value, jumpTarget = value; cursor = Clip[N[value], {0., mediaDuration}]]
+                                ],
+                                storedJumpOptions
+                            ]
+                        }
+                    ],
+                    Dynamic[
+                        Which[
+                            Head[player] === Video, player,
+                            player === $Failed, Style["The local source video could not be loaded.", Italic],
+                            True, "Click Load local video to start the native Wolfram player. The shared analysis cursor below is intentionally independent of native playback."
+                        ],
+                        TrackedSymbols :> {player}
+                    ],
+                    Row[
+                        {
+                            "Shared media time: ",
+                            Animator[Dynamic[cursor], {0., mediaDuration}, AnimationRate -> 1.],
+                            Spacer[15],
+                            InputField[
+                                Dynamic[cursor, Function[value, If[NumericQ[value], cursor = Clip[N[value], {0., mediaDuration}]]]],
+                                Number,
+                                FieldSize -> 7
+                            ],
+                            " seconds"
+                        }
+                    ],
+                    Slider[Dynamic[cursor], {0., mediaDuration}, ImageSize -> Large],
+                    "Click anywhere in the timeline to move the same cursor.",
+                    EventHandler[
+                        Dynamic[
+                            Show[storedGraphic, Graphics[{Red, Thick, Line[{{cursor, 0.}, {cursor, 6.85}}]}]],
+                            TrackedSymbols :> {cursor}
+                        ],
+                        {
+                            "MouseDown" :> With[{point = MousePosition["Graphics"]},
+                                If[ListQ[point] && Length[point] >= 1 && NumericQ[First[point]],
+                                    cursor = Clip[N[First[point]], {0., mediaDuration}]
+                                ]
+                            ]
+                        }
+                    ],
+                    Row[{"Audio metric: ", PopupMenu[Dynamic[metric], metricNames]}],
+                    Dynamic[
+                        Module[
+                            {frameIndex, framePanel, pairs, selectedAudio, valueRange, audioPlot,
+                             activeSpeech, activeScene, activeActivity, activeEvent, nearestEvent,
+                             nearestSample, statusRows},
+                            frameIndex = If[storedTimes === {}, Missing["NoFrame"], First@Ordering[Abs[storedTimes - cursor], 1]];
+                            framePanel = If[
+                                MissingQ[frameIndex],
+                                Style["No sampled frame is available.", Italic],
+                                Column[
+                                    {
+                                        ImportByteArray[storedFrames[[frameIndex]], "JPEG"],
+                                        Grid[
+                                            {
+                                                {"Nearest frame time", NumberForm[storedTimes[[frameIndex]], {Infinity, 3}]},
+                                                {"Mean RGB", NumberForm[storedRGB[[frameIndex]], {4, 3}]},
+                                                {"Brightness", NumberForm[storedBrightness[[frameIndex]], {4, 3}]},
+                                                {"Mean color", Graphics[{RGBColor @@ Clip[storedRGB[[frameIndex]], {0., 1.}], Rectangle[]}, ImageSize -> {120, 24}]}
+                                            },
+                                            Alignment -> Left
+                                        ]
+                                    },
+                                    Alignment -> Center
+                                ]
+                            ];
+                            pairs = storedSeries[metric];
+                            selectedAudio = If[audioSeriesAvailable, First@MinimalBy[pairs, Abs[First[#] - cursor] &], Missing["NoAudio"]];
+                            valueRange = MinMax[N[pairs[[All, 2]]]];
+                            If[First[valueRange] == Last[valueRange], valueRange = First[valueRange] + {-0.5, 0.5}];
+                            audioPlot = If[
+                                audioSeriesAvailable,
+                                Column[
+                                    {
+                                        ListLinePlot[
+                                            pairs,
+                                            Frame -> True,
+                                            Axes -> False,
+                                            FrameLabel -> {"Time (seconds)", metric},
+                                            PlotRange -> All,
+                                            Epilog -> {Red, Dashed, Line[{{cursor, First[valueRange]}, {cursor, Last[valueRange]}}], PointSize[Medium], Point[selectedAudio]},
+                                            ImageSize -> Large
+                                        ],
+                                        Row[{"Nearest ", metric, ": ", NumberForm[Last[selectedAudio], {Infinity, 4}], " at ", NumberForm[First[selectedAudio], {Infinity, 3}], " s"}]
+                                    }
+                                ],
+                                Style["No timestamped audio measurement is available.", Italic]
+                            ];
+                            activeSpeech = SelectFirst[storedSpeech, Lookup[#, "start", 0.] <= cursor <= Lookup[#, "end", 0.] &, Missing["NoSpeech"]];
+                            activeScene = SelectFirst[storedScenes, Lookup[#, "start", 0.] <= cursor <= Lookup[#, "end", 0.] &, Missing["NoScene"]];
+                            activeActivity = SelectFirst[storedActivity, Lookup[#, "start", 0.] <= cursor <= Lookup[#, "end", 0.] &, Missing["NoActivity"]];
+                            activeEvent = SelectFirst[
+                                storedEvents,
+                                With[{window = Lookup[#, "window_seconds", {}]}, ListQ[window] && Length[window] == 2 && First[window] <= cursor <= Last[window]] &,
+                                Missing["NoEvent"]
+                            ];
+                            nearestEvent = If[
+                                ! MissingQ[activeEvent],
+                                activeEvent,
+                                If[storedEvents === {}, Missing["NoEvent"], First@MinimalBy[storedEvents, Abs[Lookup[#, "time_seconds", 0.] - cursor] &]]
+                            ];
+                            nearestSample = If[storedAligned === {}, Missing["NoSample"], First@MinimalBy[storedAligned, Abs[Lookup[#, "time_seconds", 0.] - cursor] &]];
+                            statusRows = {
+                                {"Cursor", ToString[NumberForm[cursor, {Infinity, 3}]] <> " s"},
+                                {"Audio activity", If[MissingQ[activeActivity], "Below the emitted RMS activity regions", "Region " <> ToString[Lookup[activeActivity, "region_index", "?"]] <> " (RMS activity, not diarization)"]},
+                                {"Speech text", If[MissingQ[activeSpeech], "No timestamped speech segment covers this time", Lookup[activeSpeech, "text", ""]]},
+                                {"Speech timing", If[MissingQ[activeSpeech], "Not available", ToString[Lookup[activeSpeech, "timing_basis", "unknown"]]]},
+                                {"Visual scene", If[MissingQ[activeScene], "No derived scene covers this time", "Scene " <> ToString[Lookup[activeScene, "scene_index", "?"]] <> ", mean color " <> ToString[Lookup[activeScene, "representative_color_hex", "unknown"]]]},
+                                {"Nearest cross-modal event", If[MissingQ[nearestEvent], "No event emitted", ToString[Lookup[nearestEvent, "event_type", "event"]] <> " at " <> ToString[NumberForm[Lookup[nearestEvent, "time_seconds", 0.], {Infinity, 3}]] <> " s"]},
+                                {"Aligned sample", If[MissingQ[nearestSample], "No aligned sample emitted", "motion=" <> ToString[NumberForm[Lookup[nearestSample, "motion_normalized", 0.], {3, 2}]] <> ", RMS=" <> ToString[NumberForm[Lookup[nearestSample, "rms_normalized", 0.], {3, 2}]] <> " (normalized)"]}
+                            };
+                            Column[
+                                {
+                                    Grid[{{framePanel, Grid[statusRows, Alignment -> Left, Frame -> All]}}, Alignment -> Top, Spacings -> {1.2, .5}],
+                                    audioPlot
+                                },
+                                Spacings -> 1.2
+                            ]
+                        ],
+                        TrackedSymbols :> {cursor, metric}
+                    ],
+                    Row[{"Search speech text: ", InputField[Dynamic[query], String]}],
+                    Dynamic[
+                        If[
+                            StringTrim[query] === "",
+                            Nothing,
+                            With[{matches = Select[storedSpeech, StringContainsQ[ToString[Lookup[#, "text", ""]], query, IgnoreCase -> True] &]},
+                                If[matches === {}, Style["No speech segments match the search.", Italic], Column[Lookup[matches, "text", {}]]]
+                            ]
+                        ],
+                        TrackedSymbols :> {query}
+                    ]
+                },
+                Spacings -> 1.1
+            ],
+            UnsavedVariables :> {player}
+        ]
+    ]
+];
+
 notebookCapabilityTable[capabilities_Association] := Module[{rows},
     rows = KeyValueMap[
         Function[{name, detail},
@@ -895,8 +1150,9 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
      transcriptStatistics, transcriptDetails, motion, motionTimes, brightnessPairs, rmsPairs, loudnessPairs, motionPairs,
      sourceRuntime, overviewCards, storyboardPages, colorDetails,
      motionDetails, audioAnalytics, audioAnalyticsSummary, provenanceDetails, eventSummary, parameters,
-     methodologyItems, artifactInventory, crossModal, transcriptNotice, transcriptTextBlock,
-     videoPlayer, frameExplorer, audioExplorer, transcriptExplorer, timelineExplorer, cells},
+     methodologyItems, artifactInventory, crossModal, crossModalRecord,
+     speechNavigationSegments, sceneSegmentRecords, audioActivityRegions,
+     insights, insightItems, transcriptNotice, transcriptTextBlock, linkedExplorer, cells},
     workspaceRoot = DirectoryName[DirectoryName[ExpandFileName[inputPath]]];
     source = notebookLookup[input, "source", <||>];
     sourceAbsolutePath = FileNameJoin[{workspaceRoot, StringReplace[ToString[notebookLookup[source, "path", ""]], "/" -> $PathnameSeparator]}];
@@ -1038,6 +1294,18 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
     ];
     eventSummary = notebookLookup[measurements, "evidence_events", <||>];
     parameters = notebookLookup[input, "parameters", <||>];
+    crossModalRecord = notebookLookup[measurements, "cross_modal", <||>];
+    If[! AssociationQ[crossModalRecord], crossModalRecord = <||>];
+    speechNavigationSegments = notebookNestedLookup[measurements, {"speech_segments", "segments"}, transcriptSegments];
+    If[! ListQ[speechNavigationSegments], speechNavigationSegments = transcriptSegments];
+    sceneSegmentRecords = notebookNestedLookup[measurements, {"scene_segments", "segments"}, {}];
+    If[! ListQ[sceneSegmentRecords], sceneSegmentRecords = {}];
+    audioActivityRegions = notebookNestedLookup[measurements, {"audio_activity", "regions"}, {}];
+    If[! ListQ[audioActivityRegions], audioActivityRegions = {}];
+    insights = notebookLookup[measurements, "insights", <||>];
+    If[! AssociationQ[insights], insights = <||>];
+    insightItems = notebookLookup[insights, "items", {}];
+    If[! ListQ[insightItems], insightItems = {}];
     methodologyItems = {
         "Video is decoded locally by Wolfram Language; uniformly sampled frames feed storyboard, RGB, brightness, and frame-difference views.",
         "Color values are normalized RGB measurements. Motion is the mean absolute grayscale difference between adjacent sampled frames; it is a screening signal, not optical flow.",
@@ -1057,11 +1325,18 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
         Style[transcriptContent, "Text"],
         Style["No transcript body is attached. " <> transcriptReason, Italic]
     ];
-    videoPlayer = notebookVideoPlayer[sourceAbsolutePath];
-    frameExplorer = notebookFrameExplorer[frames, times];
-    audioExplorer = notebookAudioExplorer[audioAnalysis, duration];
-    transcriptExplorer = notebookTranscriptExplorer[transcript];
-    timelineExplorer = notebookTimelineExplorer[crossModal, duration, transcriptSegments];
+    linkedExplorer = notebookLinkedMediaExplorer[
+        sourceAbsolutePath,
+        crossModal,
+        frames,
+        times,
+        audioAnalysis,
+        duration,
+        speechNavigationSegments,
+        sceneSegmentRecords,
+        audioActivityRegions,
+        crossModalRecord
+    ];
     cells = {
         Cell["Babelapha media intelligence notebook", "Title"],
         Cell["A local, inspectable Mathematica analysis surface — generated from the same package used by the headless runner.", "Subtitle"],
@@ -1071,6 +1346,20 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
             Cell["A concise readout of what this run could verify. Every detailed section below remains tied to the source and evidence hashes.", "Text"],
             Cell[BoxData[ToBoxes[Grid[{Take[overviewCards, 3]}, Alignment -> Top, Spacings -> {.55, 0}]]], "Output"],
             Cell[BoxData[ToBoxes[Grid[{Drop[overviewCards, 3]}, Alignment -> Top, Spacings -> {.55, 0}]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["What this run shows", "Section"],
+            Cell["Deterministic observations over emitted measurements. Evidence paths identify the exact records behind each statement; correlation is descriptive and no causal, emotional, demographic, or speaker-identity claim is made.", "Text"],
+            Cell[BoxData[ToBoxes[notebookRecordsTable[insightItems, "No deterministic insight records were emitted for this run."]]], "Output"],
+            Cell["Insight method", "Subsection"],
+            Cell[BoxData[ToBoxes[notebookLookup[insights, "method", "No insight method was emitted."]]], "Output"]
+        }, Open]],
+
+        Cell[CellGroupData[{
+            Cell["Linked media explorer", "Section"],
+            Cell["One shared media-time cursor drives the nearest sampled frame, selected audio curve, RMS activity region, speech segment, visual scene, and cross-modal event. The native video player is loaded on demand and remains independent because Wolfram's saved Video control does not expose a stable programmatic seek binding.", "Text"],
+            Cell[BoxData[ToBoxes[linkedExplorer]], "Output"]
         }, Open]],
 
         Cell[CellGroupData[{
@@ -1087,11 +1376,7 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
         Cell[CellGroupData[Join[
             {
                 Cell["Video storyboard", "Section"],
-                Cell["Live source video", "Subsection"],
-                Cell[BoxData[ToBoxes[videoPlayer]], "Output"],
-                Cell["Interactive sampled-frame explorer", "Subsection"],
-                Cell[BoxData[ToBoxes[frameExplorer]], "Output"],
-                Cell["Uniformly sampled frames provide a visual index across the complete source duration. Timestamps use the shared media clock. The storyboard is split into print-safe groups so every sampled frame remains visible.", "Text"]
+                Cell["Use the Linked media explorer above for native source playback and cursor-linked frame inspection. Uniformly sampled frames below provide a static visual index across the complete source duration.", "Text"]
             },
             Cell[BoxData[ToBoxes[#]], "Output"] & /@ storyboardPages,
             {
@@ -1126,8 +1411,8 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
                 ],
                 "Text"
             ],
-            Cell["Interactive playback and measurement explorer", "Subsection"],
-            Cell[BoxData[ToBoxes[audioExplorer]], "Output"],
+            Cell["Cursor-linked playback and measurement", "Subsection"],
+            Cell["Use the Linked media explorer to select an audio metric and inspect its nearest measured value on the same clock as frames, speech, scenes, and events.", "Text"],
             Cell[BoxData[ToBoxes[notebookLookup[visuals, "audio_overview", notebookCallout["No audio overview was produced.", "absent"]]]], "Output"],
             Cell["Sound measurements", "Subsection"],
             Cell[BoxData[ToBoxes[notebookTable[KeyDrop[audioSummary, {"audible_intervals_seconds", "silence_intervals_seconds", "measurement_series"}]]]], "Output"],
@@ -1145,8 +1430,8 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
             Cell["Transcript diagnostics", "Subsection"],
             Cell[BoxData[ToBoxes[notebookTable[transcriptDetails]]], "Output"],
             Cell[BoxData[ToBoxes[transcriptTextBlock]], "Output"],
-            Cell["Interactive segment navigator", "Subsection"],
-            Cell[BoxData[ToBoxes[transcriptExplorer]], "Output"],
+            Cell["Cursor-linked speech navigation", "Subsection"],
+            Cell["The Linked media explorer selects the speech segment covering the shared cursor and includes a local text search over emitted segments.", "Text"],
             Cell["Timestamped segments", "Subsection"],
             Cell[BoxData[ToBoxes[notebookRecordsTable[transcriptSegments, "No timestamped transcript segments are attached to this run."]]], "Output"]
         }, Open]],
@@ -1156,7 +1441,7 @@ analysisNotebook[input_Association, media_Association, measurements_Association,
             Cell["Audio activity, normalized RMS and loudness, sampled brightness, motion intensity, scene-change markers, and transcript coverage share one media-time axis. Empty lanes are evidence of unavailable data, not zero-valued measurements.", "Text"],
             Cell[BoxData[ToBoxes[crossModal]], "Output"],
             Cell["Interactive time cursor", "Subsection"],
-            Cell[BoxData[ToBoxes[timelineExplorer]], "Output"]
+            Cell["The Linked media explorer above overlays its one cursor on this same timeline and supports click-to-seek within the analytical views.", "Text"]
         }, Open]],
 
         Cell[CellGroupData[{
