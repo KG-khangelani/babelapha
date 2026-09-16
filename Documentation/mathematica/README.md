@@ -13,6 +13,13 @@ source video together with its verified evidence bundle and produce portable
 JSON and PNG/SVG artifacts. The production path remains gated on commercial
 licensing.
 
+The current feature baseline is Wolfram Language/Mathematica **15.0.1**. The
+prototype should deliberately leverage Version 15's typed time/event series,
+tabular and categorical data, model reports, Structured Package Format, and
+exception handling. MCP, AI Assistant, semantic/LLM workflows, and standalone
+applications are later, separately gated experiments rather than implicit
+parts of the first pipeline stage.
+
 ## Why this boundary
 
 Wolfram Language puts signal processing, statistics, symbolic computation,
@@ -50,9 +57,11 @@ separate, optional analysis DAG preserves the existing trust boundary.
 ## Package map
 
 - [Capability assessment](capability-assessment.md)
+- [Current and recent features](new-features.md)
 - [Comparison with the Python stack](python-comparison.md)
 - [Target architecture](architecture.md)
 - [Pilot design](pilot-design.md)
+- [Phased leverage roadmap](leverage-roadmap.md)
 - [Licensing and operations](licensing-and-operations.md)
 - [Annotated sources](sources.md)
 

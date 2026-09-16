@@ -9,6 +9,11 @@ outputs, reproducibility, and artifact-level provenance.
 The pilot is a design for later execution. This documentation change does not
 install or activate Wolfram products.
 
+The implementation baseline is Wolfram Language 15.0 or newer, with the exact
+patch version recorded. It uses Version 15 Structured Package Format and typed
+exception handling. Notebook/headless equivalence must use the same patch
+version; results from 15.0.0 and 15.0.1 are separate runtime identities.
+
 ## Workload
 
 Run an **audio and provenance diagnostic** over one short, legally usable test
@@ -23,8 +28,11 @@ The shared analysis package will:
 4. calculate loudness summary statistics and detected audio/silence intervals;
 5. calculate a deterministic spectrogram-derived summary;
 6. render an audio overview plot;
-7. summarize the ingestion stage/artifact graph without changing its meaning;
-8. emit a canonical JSON result and PNG/SVG diagnostics.
+7. represent verifier-approved stage attempts as a typed `EventSeries` and
+   measurements as named-component `TimeSeries` values;
+8. summarize the ingestion stage/artifact graph without changing its meaning;
+9. emit a canonical JSON result, PNG/SVG diagnostics, and an optional
+   noncanonical Markdown review artifact.
 
 Speech recognition, LLM calls, pretrained neural networks, and cloud functions
 are excluded from the first pilot. They can be evaluated later as separately
@@ -34,19 +42,29 @@ identified processors.
 
 ```text
 prototype/mathematica/
-  Kernel/BabelaphaAnalysis.wl
+  Kernel/init.wl
+  Kernel/InputValidation.wl
+  Kernel/EvidenceAdapter.wl
+  Kernel/MediaAnalysis.wl
+  Kernel/ResultExport.wl
+  Kernel/ErrorMapping.wl
   analyze.wls
   notebooks/audio-provenance-pilot.nb
   tests/BabelaphaAnalysisTests.wlt
   fixtures/
 ```
 
-- `BabelaphaAnalysis.wl` contains all calculation and export functions.
+- `Kernel/init.wl` loads a Version 15 Structured Package Format package through
+  `PackageInitialize`; the other files separate validation, adaptation,
+  calculation, export, and stable error mapping.
 - The notebook imports the package and presents intermediate exploration.
 - `analyze.wls` is a thin command-line adapter that reads an input manifest,
   calls the package, and writes outputs.
 - Tests call package functions directly. The notebook contains no unique
   production calculation.
+- Expected validation and dependency failures use registered exception types
+  and are converted to stable CLI exit/reason codes. Unexpected exceptions
+  terminate the task and retain diagnostic context in logs, not result JSON.
 
 This layout is illustrative until the pilot is authorized; it is not created
 as part of the architecture-report phase.

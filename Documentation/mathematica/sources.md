@@ -3,6 +3,34 @@
 Sources were reviewed on 2026-09-16. Product behavior and licensing can change;
 recheck them when the pilot starts and before a production decision.
 
+## Current release and recent features
+
+- [Wolfram Language quick revision history](https://www.wolfram.com/language/quick-revision-history/)
+  — Version 15.0.1 is the July 2026 maintenance release; Version 15.0 introduced
+  the current feature generation.
+- [Version 15.0 feature summary](https://reference.wolfram.com/language/guide/SummaryOfNewFeaturesIn150.html)
+  — time/event series, tabular and categorical data, model fitting, graph,
+  neural-net backend, notebook, compiler, package, and error-handling changes.
+- [Version 15 overview](https://www.wolfram.com/language/new-in-15/)
+  — official overview of AI Assistant, MCP, notebooks, deployment, and other
+  highlighted areas.
+- [Structured Package Format](https://reference.wolfram.com/language/tutorial/UsingTheStructuredPackageFormat.html)
+  and [PackageInitialize](https://reference.wolfram.com/language/ref/PackageInitialize)
+  — Version 15 multi-file package structure selected for the prototype.
+- [CatchExceptions](https://reference.wolfram.com/language/ref/CatchExceptions.html)
+  — Version 15 typed exception handling used for stable task failure mapping.
+- [Wolfram MCP server objects](https://reference.wolfram.com/language/Wolfram/AgentTools/ref/MCPServerObject.html)
+  — predefined and custom MCP tool-server surfaces; considered only for a
+  later read-only experiment.
+- [Standalone Applications](https://reference.wolfram.com/language/StandaloneApplications/)
+  — runtime embedding, pruning, and license signatures; a later commercial
+  packaging option rather than the first pilot runtime.
+- [Version 14.3 video update history](https://reference.wolfram.com/language/guide/VideoComputation-UpdateHistory.html)
+  — stabilization, feature tracking, point-based object tracking, and
+  frame-wise video functions relevant to later media research.
+- [Official Wolfram Engine tags](https://hub.docker.com/r/wolframresearch/wolframengine/tags)
+  — currently published engine image versions; deployment still pins a digest.
+
 ## Wolfram capabilities
 
 - [Natural Language Processing](https://reference.wolfram.com/language/guide/NaturalLanguageProcessing.html.en)

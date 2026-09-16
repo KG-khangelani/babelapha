@@ -68,6 +68,32 @@ provenance/<object-id>/<analysis-run-id>/<task-id>/<attempt>-<status>.json
 `analysis-run-id` identifies one Airflow execution. Mutable convenience reports
 must not become the source of truth.
 
+## Processor evidence interface
+
+This branch adds a bounded task-payload interface for processor identity:
+
+```json
+{
+  "provenance_parameters": {
+    "analysis_id": "audio-provenance-diagnostic-v1",
+    "processor": {
+      "name": "wolfram",
+      "kernel_version": "15.0.1",
+      "system_id": "Linux-x86-64",
+      "package_sha256": "<sha256>",
+      "network_mode": "offline",
+      "evaluator_backend": "<declared backend>"
+    },
+    "resources": []
+  }
+}
+```
+
+These values are copied into the immutable manifest's
+`execution.parameters` and its OpenLineage execution facet. They must be
+strict JSON values. Babelapha rejects attempts to override object, source
+commit, DAG-bundle, Git-identity, or pipeline-task-contract facts.
+
 ## Trust and dependency boundaries
 
 ```mermaid
@@ -104,6 +130,12 @@ flowchart TB
   run. A floating `latest` tag is unsuitable evidence.
 - A notebook may call the package, but production results come from the
   headless entry point and the validated JSON contract.
+- Version 15 `Tabular`, `TimeSeries`, and `EventSeries` objects are internal
+  analysis representations. They never replace the evidence bundle or become
+  required to inspect a published result.
+- A future Wolfram MCP server is a read-only client of the same versioned
+  analysis functions. It cannot bypass the evidence API or obtain write access
+  to Airflow or MinIO.
 
 ## Failure behavior
 
