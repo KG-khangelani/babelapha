@@ -40,8 +40,9 @@ The current v2 branch now provides:
 - transcript statistics and timestamped segments aligned with visual and sound
   measurements on a shared time axis;
 - named `TimeSeries`, provenance `EventSeries`, and `Tabular` representations;
-- seven hashed Wolfram outputs, including HTML/Markdown reports and a rich
-  eleven-section notebook;
+- seven hashed Wolfram outputs, including HTML/Markdown reports and an
+  interactive eleven-section notebook with native playback, scrubbing,
+  measurement selection, transcript search, and a shared time cursor;
 - strict Python input/evidence preparation and output canonicalization only;
 - v2 source/input/result schemas, independent package-hash binding, and an
   optional two-run repeatability gate;
@@ -71,8 +72,9 @@ inside the existing result contract.
    definitions and producing portable coefficient/diagnostic summaries.
 6. **Provenance exploration:** turn richer local evidence into graph and
    temporal views without replacing canonical source/evidence JSON.
-7. **Notebook interaction:** extend the implemented review notebook with
-   package-backed interval selection and comparisons; production calculations
+7. **Notebook interaction:** build on the implemented native playback,
+   frame/audio metric explorers, transcript navigation/search, and shared time
+   cursor with package-backed interval comparisons; production calculations
    must stay in package code.
 8. **Text research:** after reviewed transcript artifacts exist, evaluate
    entity/text analysis and semantic retrieval as explicitly identified

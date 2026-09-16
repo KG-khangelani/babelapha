@@ -46,7 +46,9 @@ Mathematica owns the analysis:
   transcript statistics, and timestamped segments;
 - a shared media-time view aligning visual, sound, scene, and speech evidence;
 - named-component `TimeSeries`, provenance `EventSeries`, and `Tabular` data;
-- plots, reports, and a reproducible eleven-section Mathematica notebook.
+- plots, reports, and a reproducible eleven-section Mathematica notebook with
+  native video playback, frame/audio/timeline controls, transcript search, and
+  executable setup/rerun cells.
 
 Python is deliberately limited to the trust boundary. It hashes the source,
 writes strict local evidence and analysis input, rejects ambiguous JSON and
@@ -77,6 +79,11 @@ artifacts:
 
 The output directory also contains Wolfram's `result.raw.json` and Python's
 strictly validated canonical `result.json`.
+
+Open `analysis-notebook.nb` in the Wolfram Notebook front end, not through the
+PDF or HTML preview, to use its native controls. The notebook uses standard
+`Default.nb` styles and references the local video under `Local-prototype/ingest/`
+for playback.
 
 ## Documentation map
 

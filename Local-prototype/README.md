@@ -109,8 +109,20 @@ evidence. If a transcript or local speech model is absent, the transcript
 section remains present and explains the exact limitation instead of silently
 disappearing.
 
-The current notebook has eleven major sections and embeds the analytical
-graphics directly: six KPI cards, all twelve sampled frames, dominant colors,
+Open the native notebook—not the static PDF/HTML report—to use its controls:
+
+```powershell
+Invoke-Item .\Local-prototype\output\analysis-notebook.nb
+```
+
+The notebook uses Mathematica's default styles. It provides local video
+playback, animated frame scrubbing, selectable sound measurements, transcript
+segment navigation and search, and a shared cross-modal time cursor. Transcript
+diagnostics display the actual emitted mode, status, method, model or sidecar,
+and failure reason; the exporter does not replace them with generic text.
+
+The current notebook has eleven sections and embeds the analytical
+graphics directly: six KPI cards, a contact sheet and explorer for all twelve sampled frames, dominant colors,
 RGB/brightness trajectories, motion and scene-change candidates, waveform,
 RMS/peak/loudness curves, spectral centroid/spread, zero-crossing rate,
 fundamental-frequency candidates, spectrogram, audible/silent intervals,

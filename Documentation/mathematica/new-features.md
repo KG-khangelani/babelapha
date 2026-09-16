@@ -30,7 +30,7 @@ from Babelapha having exercised it successfully:
 | `Tabular` interoperability | Validated | Typed internal evidence table with portable summary |
 | First-class `Video`, `Audio`, plots, and spectrograms | Validated | Color, motion, sound, pitch, and notebook visuals |
 | Wolfram neural-network repository resource | Validated locally | Pinned and hash-verified Whisper-V1 Tiny CPU inference |
-| Rich Mathematica notebook authoring | Validated | Eleven-section notebook with embedded graphics and package-backed rerun cell |
+| Rich Mathematica notebook authoring | Validated | Eleven-section `Default.nb` notebook with native media, `DynamicModule` explorers, transcript search, and package-backed input cells |
 | `ModelFit`/`ModelFitReport`, semantic retrieval, LLM graphs, MCP, standalone applications, AI Assistant | Not implemented | Separately gated future experiments |
 
 The Whisper cache command is intentionally the only network-enabled step. The

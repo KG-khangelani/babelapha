@@ -3,15 +3,17 @@
 `output/analysis-notebook.nb` is a generated review surface backed by the same
 `BabelaphaAnalysis` package as the headless runner. It does not contain a
 second analysis implementation. The v2 result gate requires the named
-analytical sections and at least five embedded graphics before it accepts the
-notebook.
+analytical sections, embedded graphics, native dynamic controls, an executable
+initialization cell, truthful transcript status/method markers, and
+`Default.nb` styling before it accepts the notebook. A static report renamed to
+`.nb` no longer passes validation.
 
 ```mermaid
 flowchart LR
     I[Verified input and package] --> A[Wolfram analysis]
     A --> M[Portable measurements]
-    A --> V[Embedded visuals]
-    M --> N[Eleven-section notebook]
+    A --> V[Embedded visuals and local media]
+    M --> N[Interactive eleven-section notebook]
     V --> N
     N --> G[Python hash and structure gate]
 ```
@@ -22,19 +24,20 @@ The eleven top-level sections are:
    loudness, audible share, and transcript status.
 2. **Source and runtime** — source, object/run identity, Wolfram runtime,
    package hash, network mode, and analysis parameters.
-3. **Video storyboard** — all twelve uniformly sampled frames with shared-clock
-   timestamps plus the Wolfram video summary.
+3. **Video storyboard** — native local video playback, an animated/scrubbable
+   sampled-frame explorer, the full contact sheet, and Wolfram video summary.
 4. **Color analysis** — dominant palette, RGB and brightness trajectories,
    saturation, contrast, and colorfulness measurements.
 5. **Motion and temporal structure** — adjacent-frame motion,
    color-histogram distance, and thresholded scene-change candidates.
 6. **Sound intelligence** — waveform, RMS/peak/loudness curves, spectral
-   centroid and spread, zero-crossing rate, pitch candidates, spectrogram, and
-   audible/silent intervals.
-7. **Transcript and speech text** — verified Whisper or sidecar content,
-   timestamped segments, statistics, and an explicit reason when unavailable.
+   centroid and spread, zero-crossing rate, pitch candidates, spectrogram,
+   audible/silent intervals, and selectable measurement/cursor controls.
+7. **Transcript and speech text** — the exact emitted status, method, reason,
+   model/sidecar source, statistics, content, segment selector, and live search.
 8. **Cross-modal timeline** — brightness, motion, audio activity, RMS,
-   loudness, scene markers, and transcript coverage on one media-time axis.
+   loudness, scene markers, and transcript coverage on one media-time axis with
+   a movable cursor and active transcript text.
 9. **Provenance and evidence** — source/evidence/package identity, ordered
    evidence-event summary, and the output inventory.
 10. **Capabilities and methodology** — `USED`, `UNAVAILABLE`, or
@@ -47,3 +50,9 @@ The eleven top-level sections are:
 and is also a required marker at the validation boundary. Empty transcript or
 audio lanes remain visible and explain why data is unavailable; they are not
 silently converted to zero-valued observations.
+
+The notebook uses Mathematica's standard `Default.nb` styles. Controls are
+self-contained `DynamicModule` outputs; editable setup and rerun cells use
+normal executable `Input` boxes. The video player deliberately references the
+local file under `ingest/`, so moving or deleting that source breaks playback
+without changing the hash-bound analytical result.
