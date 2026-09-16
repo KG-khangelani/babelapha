@@ -390,7 +390,7 @@ analyzeAudioTrack[video_Video, parameters_Association, mediaDuration_] := Module
      audible, silence, centroidValues, audioDuration, summary, peakSeries, spreadSeries,
      zeroCrossingSeries, loudnessSeries, pitchSeries, rmsValues, peakValues, spreadValues,
      zeroCrossingValues, loudnessValues, pitchValues, rmsDBFSValues, nonSilentRMSDBFS,
-     globalRMS, globalPeak, crestFactor, crestFactorDB, localDynamicRangeDB, pitchStatus,
+     globalRMS, globalPeak, audioSamples, crestFactor, crestFactorDB, localDynamicRangeDB, pitchStatus,
      pitchReason, windowCount, sampleRate, analytics},
     audio = safeMediaEvaluation[Audio[video]];
     If[! TrueQ[AudioQ[audio]], Return[emptyAudioAnalysis[]]];
@@ -428,6 +428,18 @@ analyzeAudioTrack[video_Video, parameters_Association, mediaDuration_] := Module
     nonSilentRMSDBFS = amplitudeDBFS /@ Select[rmsValues, # > 10.^-12 &];
     globalRMS = finiteNumberOrNull[AudioMeasurements[audio, "RMSAmplitude"]];
     globalPeak = finiteNumberOrNull[AudioMeasurements[audio, "MaxAbs"]];
+    If[! finiteRealQ[globalRMS] || ! finiteRealQ[globalPeak],
+        audioSamples = Select[
+            Flatten@N@safeMediaEvaluation[AudioData[audio]],
+            finiteRealQ
+        ];
+        If[audioSamples =!= {},
+            If[! finiteRealQ[globalRMS], globalRMS = N[Sqrt[Mean[audioSamples^2]]]];
+            If[! finiteRealQ[globalPeak], globalPeak = N[Max[Abs[audioSamples]]]]
+        ]
+    ];
+    If[! finiteRealQ[globalRMS] && rmsValues =!= {}, globalRMS = N[Sqrt[Mean[rmsValues^2]]]];
+    If[! finiteRealQ[globalPeak] && peakValues =!= {}, globalPeak = N[Max[peakValues]]];
     crestFactor = If[
         finiteRealQ[globalRMS] && finiteRealQ[globalPeak] && globalRMS > 0.,
         N[globalPeak/globalRMS],

@@ -50,7 +50,7 @@ verifyTranscriptSidecar[input_Association, workspaceRoot_String] := Module[
 runAnalysisFileImplementation[inputPath_String] := Module[
     {absoluteInput, workspaceRoot, input, sourcePath, transcriptSidecarPath, evidence,
      media, outputDirectory, audioSummary, transcript, transcriptConfig,
-     transcriptCapability, measurements, provenance, exported, result},
+     transcriptCapability, intelligence, measurements, provenance, exported, result},
     absoluteInput = ExpandFileName[inputPath];
     workspaceRoot = workspaceRootForInput[absoluteInput];
     input = importAnalysisInput[absoluteInput];
@@ -82,7 +82,13 @@ runAnalysisFileImplementation[inputPath_String] := Module[
     media["capabilities", "motion_analysis"] = capability["USED"];
     media["capabilities", "sound_analysis"] = If[TrueQ[media["audio_analysis", "available"]], capability["USED"], capability["UNAVAILABLE", "The video has no decodable audio track."]];
     media["capabilities", "transcript_analysis"] = transcriptCapability;
-    media["capabilities", "cross_modal_analysis"] = capability["USED"];
+    intelligence = deriveMediaIntelligence[media, input["parameters"]];
+    media["media_intelligence"] = intelligence;
+    media["capabilities", "cross_modal_analysis"] = If[
+        intelligence["cross_modal", "status"] === "AVAILABLE",
+        capability["USED"],
+        capability["UNAVAILABLE", intelligence["cross_modal", "reason"]]
+    ];
     audioSummary = media["audio_analysis", "summary"];
     measurements = Join[
         audioSummary,
@@ -92,6 +98,11 @@ runAnalysisFileImplementation[inputPath_String] := Module[
             "video_analytics" -> KeyDrop[media["video_analytics"], {"time_series"}],
             "audio_analytics" -> media["audio_analysis", "analytics"],
             "transcript" -> transcript,
+            "audio_activity" -> intelligence["audio_activity"],
+            "speech_segments" -> intelligence["speech_segments"],
+            "scene_segments" -> intelligence["scene_segments"],
+            "cross_modal" -> intelligence["cross_modal"],
+            "insights" -> intelligence["insights"],
             "evidence_events" -> evidence["event_summary"],
             "tabular_summary" -> evidence["tabular_summary"]
         |>

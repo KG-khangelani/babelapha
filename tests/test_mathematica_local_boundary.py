@@ -319,6 +319,153 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
             "inference": None,
         }
 
+    def _media_intelligence(self, *, audio=True):
+        audio_activity = (
+            {
+                "status": "AVAILABLE",
+                "reason": "",
+                "method": "RMS-threshold intervals merged across short gaps; activity is not speaker diarization",
+                "threshold_dbfs": -40.0,
+                "merge_gap_seconds": 0.2,
+                "minimum_region_seconds": 0.2,
+                "audible_coverage_fraction": 0.25,
+                "regions": [
+                    {
+                        "region_index": 1,
+                        "start_seconds": 1.0,
+                        "end_seconds": 2.0,
+                        "active_duration_seconds": 1.0,
+                        "interval_count": 1,
+                        "duration_seconds": 1.0,
+                        "activity_fraction": 1.0,
+                    }
+                ],
+            }
+            if audio
+            else {
+                "status": "UNAVAILABLE",
+                "reason": "No decodable audio track was available for activity segmentation.",
+                "method": "RMS-threshold intervals merged across short gaps; activity is not speaker diarization",
+                "threshold_dbfs": -40.0,
+                "merge_gap_seconds": 0.2,
+                "minimum_region_seconds": 0.2,
+                "audible_coverage_fraction": None,
+                "regions": [],
+            }
+        )
+        scene_segments = {
+            "status": "AVAILABLE",
+            "reason": "",
+            "method": "contiguous scenes bounded by consolidated visual-change candidates",
+            "minimum_separation_seconds": 0.5,
+            "boundary_count": 0,
+            "segments": [
+                {
+                    "scene_index": 1,
+                    "start_seconds": 0.0,
+                    "end_seconds": 4.0,
+                    "duration_seconds": 4.0,
+                    "sample_count": 3,
+                    "representative_time_seconds": 2.0,
+                    "mean_brightness": 0.4,
+                    "mean_motion": 0.06666666666666667,
+                    "mean_colorfulness": 0.15,
+                    "representative_color_hex": "#4C6680",
+                    "entry_boundary_score": None,
+                }
+            ],
+        }
+        cross_modal = (
+            {
+                "status": "AVAILABLE",
+                "reason": "",
+                "method": "nearest-time alignment of video motion and audio RMS; descriptive only",
+                "sample_count": 3,
+                "motion_rms_pearson_correlation": None,
+                "aligned_samples": [
+                    {
+                        "time_seconds": 0.0,
+                        "motion": 0.0,
+                        "rms_amplitude": 0.01,
+                        "motion_normalized": 0.0,
+                        "rms_normalized": 0.0,
+                    },
+                    {
+                        "time_seconds": 2.0,
+                        "motion": 0.1,
+                        "rms_amplitude": 0.1,
+                        "motion_normalized": 1.0,
+                        "rms_normalized": 1.0,
+                    },
+                    {
+                        "time_seconds": 4.0,
+                        "motion": 0.1,
+                        "rms_amplitude": 0.05,
+                        "motion_normalized": 1.0,
+                        "rms_normalized": 0.4444444444444445,
+                    },
+                ],
+                "events": [
+                    {
+                        "event_index": 1,
+                        "event_type": "AUDIO_VISUAL_PEAK",
+                        "time_seconds": 2.0,
+                        "window_seconds": [1.75, 2.25],
+                        "score": 1.0,
+                        "scene_score": None,
+                        "motion": 0.1,
+                        "rms_amplitude": 0.1,
+                        "motion_normalized": 1.0,
+                        "rms_normalized": 1.0,
+                        "audio_activity": True,
+                        "transcript_text": None,
+                        "evidence_paths": [
+                            "measurements.cross_modal.aligned_samples"
+                        ],
+                    }
+                ],
+            }
+            if audio
+            else {
+                "status": "UNAVAILABLE",
+                "reason": "Cross-modal alignment requires timestamped video samples and a decodable audio RMS series.",
+                "method": "nearest-time alignment of video motion and audio RMS; descriptive only",
+                "sample_count": 0,
+                "motion_rms_pearson_correlation": None,
+                "aligned_samples": [],
+                "events": [],
+            }
+        )
+        return {
+            "audio_activity": audio_activity,
+            "speech_segments": {
+                "status": "UNAVAILABLE",
+                "reason": "The pinned local model is not cached.",
+                "method": "sentence navigation derived from verified transcript segments",
+                "timing_basis": "UNAVAILABLE",
+                "speaker_diarization": "NOT_PERFORMED",
+                "segment_count": 0,
+                "segments": [],
+            },
+            "scene_segments": scene_segments,
+            "cross_modal": cross_modal,
+            "insights": {
+                "method": "deterministic descriptive rules over emitted measurements",
+                "items": [
+                    {
+                        "insight_id": "insight-01",
+                        "kind": "OBSERVATION",
+                        "headline": "Visual structure",
+                        "statement": "One contiguous visual scene covers the source.",
+                        "time_seconds": None,
+                        "evidence_paths": [
+                            "measurements.scene_segments.segments"
+                        ],
+                    }
+                ],
+            },
+        }
+
     def _valid_result(self, *, audio=True):
         analysis_input = self._input()
         capabilities = {
@@ -337,6 +484,10 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
             capabilities["sound_analysis"] = {
                 "status": "UNAVAILABLE",
                 "reason": "The source has no audio track.",
+            }
+            capabilities["cross_modal_analysis"] = {
+                "status": "UNAVAILABLE",
+                "reason": "Cross-modal alignment requires timestamped video samples and a decodable audio RMS series.",
             }
         return {
             "schema_version": analysis_input["schema_version"],
@@ -404,6 +555,7 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                 "video_analytics": self._video_analytics(),
                 "audio_analytics": self._audio_analytics(audio),
                 "transcript": self._unavailable_transcript(),
+                **self._media_intelligence(audio=audio),
             },
             "provenance_summary": {
                 "task_count": 2,
@@ -606,6 +758,9 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         result = self._valid_result()
         result["measurements"]["audio_duration_seconds"] = 4.1
         result["measurements"]["silence_intervals_seconds"][-1][1] = 4.1
+        result["measurements"]["audio_activity"][
+            "audible_coverage_fraction"
+        ] = 1.0 / 4.1
         self._write_raw_result(result)
 
         boundary.validate_result(self.workspace)

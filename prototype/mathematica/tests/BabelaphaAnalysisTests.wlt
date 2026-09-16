@@ -146,3 +146,68 @@ VerificationTest[
     "UNAVAILABLE",
     TestID -> "out-of-range-sidecar-cue-is-unavailable"
 ]
+
+intelligenceFixture = <|
+    "duration_seconds" -> 4.,
+    "video_analytics" -> <|
+        "per_frame" -> {
+            <|"time_seconds" -> 0., "frame_difference" -> 0., "brightness" -> .4, "colorfulness" -> .1, "mean_color_hex" -> "#445566"|>,
+            <|"time_seconds" -> 2., "frame_difference" -> .3, "brightness" -> .6, "colorfulness" -> .2, "mean_color_hex" -> "#667788"|>,
+            <|"time_seconds" -> 4., "frame_difference" -> .1, "brightness" -> .5, "colorfulness" -> .15, "mean_color_hex" -> "#556677"|>
+        },
+        "scene_changes" -> <|
+            "candidates" -> {
+                <|"time_seconds" -> 2., "score" -> .7|>
+            }
+        |>
+    |>,
+    "audio_analysis" -> <|
+        "available" -> True,
+        "rms_series" -> TimeSeries[{.01, .10, .05}, {{0., 2., 4.}}],
+        "summary" -> <|
+            "audio_duration_seconds" -> 4.,
+            "audible_intervals_seconds" -> {{.5, 1.5}, {1.6, 3.5}}
+        |>
+    |>,
+    "transcript" -> <|
+        "status" -> "AVAILABLE",
+        "reason" -> "",
+        "text" -> "First sentence. Second sentence.",
+        "segments" -> {
+            <|"start_seconds" -> 0., "end_seconds" -> 4., "text" -> "First sentence. Second sentence."|>
+        },
+        "statistics" -> <|"word_count" -> 4|>
+    |>
+|>;
+
+derivedIntelligence = BabelaphaAnalysis`PackageScope`deriveMediaIntelligence[
+    intelligenceFixture,
+    <|"silence_threshold_db" -> -40.|>
+];
+
+VerificationTest[
+    Sort[Keys[derivedIntelligence]],
+    Sort[{"audio_activity", "speech_segments", "scene_segments", "cross_modal", "insights"}],
+    TestID -> "media-intelligence-contract-is-complete"
+]
+
+VerificationTest[
+    {
+        derivedIntelligence["audio_activity", "regions"][[1, "interval_count"]],
+        derivedIntelligence["speech_segments", "segment_count"],
+        derivedIntelligence["speech_segments", "timing_basis"]
+    },
+    {2, 2, "MIXED_WITH_ESTIMATED_SENTENCE_TIMING"},
+    TestID -> "activity-and-speech-navigation-are-segmented"
+]
+
+VerificationTest[
+    {
+        derivedIntelligence["scene_segments", "boundary_count"],
+        Length[derivedIntelligence["scene_segments", "segments"]],
+        derivedIntelligence["cross_modal", "sample_count"],
+        Length[derivedIntelligence["cross_modal", "events"]]
+    },
+    {1, 2, 3, 2},
+    TestID -> "scene-and-cross-modal-events-are-derived"
+]

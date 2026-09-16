@@ -1090,7 +1090,6 @@ def _validate_capabilities(value: object) -> None:
         "frame_analysis",
         "color_analysis",
         "motion_analysis",
-        "cross_modal_analysis",
         "time_series",
         "event_series",
         "tabular",
@@ -1812,6 +1811,677 @@ def _validate_transcript_measurement(
             )
 
 
+def _validate_audio_activity(
+    value: object,
+    duration: float,
+    audio_available: bool,
+    parameters: dict,
+    audible_intervals: list,
+) -> None:
+    path = "measurements.audio_activity"
+    activity = _strict_fields(
+        value,
+        {
+            "status",
+            "reason",
+            "method",
+            "threshold_dbfs",
+            "merge_gap_seconds",
+            "minimum_region_seconds",
+            "audible_coverage_fraction",
+            "regions",
+        },
+        path,
+        ResultContractError,
+    )
+    status = _string(activity["status"], f"{path}.status", ResultContractError)
+    reason = _string(
+        activity["reason"], f"{path}.reason", ResultContractError, nonempty=False
+    )
+    _string(activity["method"], f"{path}.method", ResultContractError)
+    threshold = _number(
+        activity["threshold_dbfs"], f"{path}.threshold_dbfs", ResultContractError
+    )
+    if not math.isclose(
+        threshold,
+        parameters["silence_threshold_db"],
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ):
+        raise ResultContractError(f"{path}.threshold_dbfs differs from analysis parameters")
+    merge_gap = _number(
+        activity["merge_gap_seconds"],
+        f"{path}.merge_gap_seconds",
+        ResultContractError,
+        minimum=0.0,
+    )
+    minimum_region = _number(
+        activity["minimum_region_seconds"],
+        f"{path}.minimum_region_seconds",
+        ResultContractError,
+        minimum=0.0,
+    )
+    coverage = _number(
+        activity["audible_coverage_fraction"],
+        f"{path}.audible_coverage_fraction",
+        ResultContractError,
+        minimum=0.0,
+        maximum=1.0,
+        nullable=not audio_available,
+    )
+    regions = activity["regions"]
+    if not isinstance(regions, list):
+        raise ResultContractError(f"{path}.regions must be an array")
+    if audio_available:
+        if status != "AVAILABLE" or reason:
+            raise ResultContractError(f"{path} must be AVAILABLE without a reason")
+        expected_coverage = sum(end - start for start, end in audible_intervals) / duration
+        if not math.isclose(
+            coverage, expected_coverage, rel_tol=1e-8, abs_tol=1e-8
+        ):
+            raise ResultContractError(
+                f"{path}.audible_coverage_fraction differs from audible intervals"
+            )
+    elif status != "UNAVAILABLE" or not reason or coverage is not None or regions:
+        raise ResultContractError(
+            f"{path} must be empty and explained when audio is unavailable"
+        )
+
+    previous_end = -1.0
+    for index, raw_region in enumerate(regions):
+        region_path = f"{path}.regions[{index}]"
+        region = _strict_fields(
+            raw_region,
+            {
+                "region_index",
+                "start_seconds",
+                "end_seconds",
+                "active_duration_seconds",
+                "interval_count",
+                "duration_seconds",
+                "activity_fraction",
+            },
+            region_path,
+            ResultContractError,
+        )
+        if _integer(
+            region["region_index"],
+            f"{region_path}.region_index",
+            ResultContractError,
+            minimum=1,
+        ) != index + 1:
+            raise ResultContractError(f"{path}.region indexes must be consecutive")
+        start = _number(
+            region["start_seconds"],
+            f"{region_path}.start_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        end = _number(
+            region["end_seconds"],
+            f"{region_path}.end_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        region_duration = _number(
+            region["duration_seconds"],
+            f"{region_path}.duration_seconds",
+            ResultContractError,
+            minimum=0.0,
+        )
+        active_duration = _number(
+            region["active_duration_seconds"],
+            f"{region_path}.active_duration_seconds",
+            ResultContractError,
+            minimum=0.0,
+        )
+        fraction = _number(
+            region["activity_fraction"],
+            f"{region_path}.activity_fraction",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        _integer(
+            region["interval_count"],
+            f"{region_path}.interval_count",
+            ResultContractError,
+            minimum=1,
+        )
+        if end <= start or end - start + 1e-9 < minimum_region:
+            raise ResultContractError(f"{region_path} has an invalid duration")
+        if start < previous_end - 1e-9:
+            raise ResultContractError(f"{path}.regions must be ordered and non-overlapping")
+        if not math.isclose(region_duration, end - start, rel_tol=1e-8, abs_tol=1e-8):
+            raise ResultContractError(f"{region_path}.duration_seconds is inconsistent")
+        if active_duration > region_duration + 1e-8 or not math.isclose(
+            fraction,
+            active_duration / region_duration,
+            rel_tol=1e-8,
+            abs_tol=1e-8,
+        ):
+            raise ResultContractError(f"{region_path}.activity_fraction is inconsistent")
+        previous_end = end
+
+
+def _validate_speech_segments(
+    value: object, duration: float, transcript: dict
+) -> None:
+    path = "measurements.speech_segments"
+    speech = _strict_fields(
+        value,
+        {
+            "status",
+            "reason",
+            "method",
+            "timing_basis",
+            "speaker_diarization",
+            "segment_count",
+            "segments",
+        },
+        path,
+        ResultContractError,
+    )
+    status = _string(speech["status"], f"{path}.status", ResultContractError)
+    reason = _string(
+        speech["reason"], f"{path}.reason", ResultContractError, nonempty=False
+    )
+    _string(speech["method"], f"{path}.method", ResultContractError)
+    timing_basis = _string(
+        speech["timing_basis"], f"{path}.timing_basis", ResultContractError
+    )
+    if timing_basis not in {
+        "UNAVAILABLE",
+        "SOURCE_SEGMENTS",
+        "MIXED_WITH_ESTIMATED_SENTENCE_TIMING",
+    }:
+        raise ResultContractError(f"{path}.timing_basis is unsupported")
+    if speech["speaker_diarization"] != "NOT_PERFORMED":
+        raise ResultContractError(
+            f"{path}.speaker_diarization must disclose that diarization was not performed"
+        )
+    count = _integer(
+        speech["segment_count"],
+        f"{path}.segment_count",
+        ResultContractError,
+        minimum=0,
+    )
+    segments = speech["segments"]
+    if not isinstance(segments, list) or len(segments) != count:
+        raise ResultContractError(f"{path}.segments differs from segment_count")
+    transcript_available = transcript["status"] == "AVAILABLE"
+    if transcript_available:
+        if status != "AVAILABLE" or reason or count < 1 or timing_basis == "UNAVAILABLE":
+            raise ResultContractError(
+                f"{path} must contain navigable segments for an available transcript"
+            )
+    elif status != "UNAVAILABLE" or not reason or count or segments or timing_basis != "UNAVAILABLE":
+        raise ResultContractError(
+            f"{path} must be empty and explained when the transcript is unavailable"
+        )
+
+    previous_start = -1.0
+    for index, raw_segment in enumerate(segments):
+        segment_path = f"{path}.segments[{index}]"
+        segment = _strict_fields(
+            raw_segment,
+            {
+                "segment_index",
+                "source_segment_index",
+                "sentence_index",
+                "start_seconds",
+                "end_seconds",
+                "duration_seconds",
+                "text",
+                "word_count",
+                "timing_basis",
+            },
+            segment_path,
+            ResultContractError,
+        )
+        if _integer(
+            segment["segment_index"],
+            f"{segment_path}.segment_index",
+            ResultContractError,
+            minimum=1,
+        ) != index + 1:
+            raise ResultContractError(f"{path}.segment indexes must be consecutive")
+        for name in ("source_segment_index", "sentence_index", "word_count"):
+            _integer(
+                segment[name],
+                f"{segment_path}.{name}",
+                ResultContractError,
+                minimum=1,
+            )
+        start = _number(
+            segment["start_seconds"],
+            f"{segment_path}.start_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        end = _number(
+            segment["end_seconds"],
+            f"{segment_path}.end_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        segment_duration = _number(
+            segment["duration_seconds"],
+            f"{segment_path}.duration_seconds",
+            ResultContractError,
+            minimum=0.0,
+        )
+        _string(segment["text"], f"{segment_path}.text", ResultContractError)
+        if segment["timing_basis"] not in {
+            "SOURCE_SEGMENT",
+            "PROPORTIONAL_WITHIN_SOURCE_SEGMENT",
+        }:
+            raise ResultContractError(f"{segment_path}.timing_basis is unsupported")
+        if end < start or start < previous_start:
+            raise ResultContractError(f"{path}.segments must be ordered with valid bounds")
+        if not math.isclose(
+            segment_duration, end - start, rel_tol=1e-8, abs_tol=1e-8
+        ):
+            raise ResultContractError(f"{segment_path}.duration_seconds is inconsistent")
+        previous_start = start
+
+
+def _validate_scene_segments(value: object, duration: float) -> None:
+    path = "measurements.scene_segments"
+    scenes = _strict_fields(
+        value,
+        {
+            "status",
+            "reason",
+            "method",
+            "minimum_separation_seconds",
+            "boundary_count",
+            "segments",
+        },
+        path,
+        ResultContractError,
+    )
+    if scenes["status"] != "AVAILABLE" or scenes["reason"] != "":
+        raise ResultContractError(f"{path} must be available for a validated video")
+    _string(scenes["method"], f"{path}.method", ResultContractError)
+    _number(
+        scenes["minimum_separation_seconds"],
+        f"{path}.minimum_separation_seconds",
+        ResultContractError,
+        minimum=0.0,
+    )
+    boundary_count = _integer(
+        scenes["boundary_count"],
+        f"{path}.boundary_count",
+        ResultContractError,
+        minimum=0,
+    )
+    segments = scenes["segments"]
+    if not isinstance(segments, list) or len(segments) != boundary_count + 1:
+        raise ResultContractError(
+            f"{path}.segments must contain one more scene than boundaries"
+        )
+    previous_end = 0.0
+    for index, raw_segment in enumerate(segments):
+        segment_path = f"{path}.segments[{index}]"
+        segment = _strict_fields(
+            raw_segment,
+            {
+                "scene_index",
+                "start_seconds",
+                "end_seconds",
+                "duration_seconds",
+                "sample_count",
+                "representative_time_seconds",
+                "mean_brightness",
+                "mean_motion",
+                "mean_colorfulness",
+                "representative_color_hex",
+                "entry_boundary_score",
+            },
+            segment_path,
+            ResultContractError,
+        )
+        if _integer(
+            segment["scene_index"],
+            f"{segment_path}.scene_index",
+            ResultContractError,
+            minimum=1,
+        ) != index + 1:
+            raise ResultContractError(f"{path}.scene indexes must be consecutive")
+        start = _number(
+            segment["start_seconds"],
+            f"{segment_path}.start_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        end = _number(
+            segment["end_seconds"],
+            f"{segment_path}.end_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        segment_duration = _number(
+            segment["duration_seconds"],
+            f"{segment_path}.duration_seconds",
+            ResultContractError,
+            minimum=0.0,
+        )
+        if end <= start or not math.isclose(start, previous_end, abs_tol=1e-8):
+            raise ResultContractError(f"{path}.segments must be positive and contiguous")
+        if not math.isclose(segment_duration, end - start, rel_tol=1e-8, abs_tol=1e-8):
+            raise ResultContractError(f"{segment_path}.duration_seconds is inconsistent")
+        _integer(
+            segment["sample_count"],
+            f"{segment_path}.sample_count",
+            ResultContractError,
+            minimum=1,
+        )
+        representative = _number(
+            segment["representative_time_seconds"],
+            f"{segment_path}.representative_time_seconds",
+            ResultContractError,
+            minimum=start,
+            maximum=end,
+        )
+        if representative < start or representative > end:
+            raise ResultContractError(f"{segment_path} representative lies outside the scene")
+        for name, maximum in (
+            ("mean_brightness", 1.0),
+            ("mean_motion", 1.0),
+            ("mean_colorfulness", 2.0),
+        ):
+            _number(
+                segment[name],
+                f"{segment_path}.{name}",
+                ResultContractError,
+                minimum=0.0,
+                maximum=maximum,
+            )
+        if not re.fullmatch(
+            r"#[A-F0-9]{6}",
+            _string(
+                segment["representative_color_hex"],
+                f"{segment_path}.representative_color_hex",
+                ResultContractError,
+            ),
+        ):
+            raise ResultContractError(f"{segment_path}.representative_color_hex is invalid")
+        boundary_score = _number(
+            segment["entry_boundary_score"],
+            f"{segment_path}.entry_boundary_score",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+            nullable=index == 0,
+        )
+        if index == 0 and boundary_score is not None:
+            raise ResultContractError(f"{segment_path}.entry_boundary_score must be null")
+        if index > 0 and boundary_score is None:
+            raise ResultContractError(f"{segment_path}.entry_boundary_score is required")
+        previous_end = end
+    if not math.isclose(previous_end, duration, rel_tol=1e-8, abs_tol=1e-8):
+        raise ResultContractError(f"{path}.segments must cover the complete media duration")
+
+
+def _validate_cross_modal(
+    value: object, duration: float, audio_available: bool, capability: dict
+) -> None:
+    path = "measurements.cross_modal"
+    cross_modal = _strict_fields(
+        value,
+        {
+            "status",
+            "reason",
+            "method",
+            "sample_count",
+            "motion_rms_pearson_correlation",
+            "aligned_samples",
+            "events",
+        },
+        path,
+        ResultContractError,
+    )
+    status = _string(cross_modal["status"], f"{path}.status", ResultContractError)
+    reason = _string(
+        cross_modal["reason"], f"{path}.reason", ResultContractError, nonempty=False
+    )
+    _string(cross_modal["method"], f"{path}.method", ResultContractError)
+    count = _integer(
+        cross_modal["sample_count"],
+        f"{path}.sample_count",
+        ResultContractError,
+        minimum=0,
+    )
+    correlation = _number(
+        cross_modal["motion_rms_pearson_correlation"],
+        f"{path}.motion_rms_pearson_correlation",
+        ResultContractError,
+        minimum=-1.0,
+        maximum=1.0,
+        nullable=True,
+    )
+    samples = cross_modal["aligned_samples"]
+    events = cross_modal["events"]
+    if not isinstance(samples, list) or len(samples) != count:
+        raise ResultContractError(f"{path}.aligned_samples differs from sample_count")
+    if not isinstance(events, list):
+        raise ResultContractError(f"{path}.events must be an array")
+    if audio_available:
+        if (
+            status != "AVAILABLE"
+            or reason
+            or count < 1
+            or capability["status"] != "USED"
+        ):
+            raise ResultContractError(
+                f"{path} must be available when audio and video measurements exist"
+            )
+    elif (
+        status != "UNAVAILABLE"
+        or not reason
+        or count
+        or samples
+        or events
+        or correlation is not None
+        or capability["status"] != "UNAVAILABLE"
+    ):
+        raise ResultContractError(
+            f"{path} must be empty and explained when audio is unavailable"
+        )
+
+    previous_time = -1.0
+    sample_fields = {
+        "time_seconds",
+        "motion",
+        "rms_amplitude",
+        "motion_normalized",
+        "rms_normalized",
+    }
+    for index, raw_sample in enumerate(samples):
+        sample_path = f"{path}.aligned_samples[{index}]"
+        sample = _strict_fields(raw_sample, sample_fields, sample_path, ResultContractError)
+        time_value = _number(
+            sample["time_seconds"],
+            f"{sample_path}.time_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        if time_value < previous_time:
+            raise ResultContractError(f"{path}.aligned_samples must be time ordered")
+        for name in ("motion", "rms_amplitude"):
+            _number(
+                sample[name], f"{sample_path}.{name}", ResultContractError, minimum=0.0
+            )
+        for name in ("motion_normalized", "rms_normalized"):
+            _number(
+                sample[name],
+                f"{sample_path}.{name}",
+                ResultContractError,
+                minimum=0.0,
+                maximum=1.0,
+            )
+        previous_time = time_value
+
+    previous_event_time = -1.0
+    event_fields = {
+        "event_index",
+        "event_type",
+        "time_seconds",
+        "window_seconds",
+        "score",
+        "scene_score",
+        "motion",
+        "rms_amplitude",
+        "motion_normalized",
+        "rms_normalized",
+        "audio_activity",
+        "transcript_text",
+        "evidence_paths",
+    }
+    for index, raw_event in enumerate(events):
+        event_path = f"{path}.events[{index}]"
+        event = _strict_fields(raw_event, event_fields, event_path, ResultContractError)
+        if _integer(
+            event["event_index"],
+            f"{event_path}.event_index",
+            ResultContractError,
+            minimum=1,
+        ) != index + 1:
+            raise ResultContractError(f"{path}.event indexes must be consecutive")
+        event_type = _string(
+            event["event_type"], f"{event_path}.event_type", ResultContractError
+        )
+        if event_type not in {
+            "AUDIO_VISUAL_PEAK",
+            "SCENE_CHANGE_WITH_AUDIO",
+            "SCENE_CHANGE_IN_SILENCE",
+        }:
+            raise ResultContractError(f"{event_path}.event_type is unsupported")
+        event_time = _number(
+            event["time_seconds"],
+            f"{event_path}.time_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        if event_time < previous_event_time:
+            raise ResultContractError(f"{path}.events must be time ordered")
+        window = event["window_seconds"]
+        if not isinstance(window, list) or len(window) != 2:
+            raise ResultContractError(f"{event_path}.window_seconds must be [start, end]")
+        window_start = _number(
+            window[0],
+            f"{event_path}.window_seconds[0]",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        window_end = _number(
+            window[1],
+            f"{event_path}.window_seconds[1]",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+        )
+        if window_start > event_time or event_time > window_end:
+            raise ResultContractError(f"{event_path}.window_seconds must contain the event")
+        _number(
+            event["score"],
+            f"{event_path}.score",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        _number(
+            event["scene_score"],
+            f"{event_path}.scene_score",
+            ResultContractError,
+            minimum=0.0,
+            maximum=1.0,
+            nullable=True,
+        )
+        for name in ("motion", "rms_amplitude"):
+            _number(event[name], f"{event_path}.{name}", ResultContractError, minimum=0.0)
+        for name in ("motion_normalized", "rms_normalized"):
+            _number(
+                event[name],
+                f"{event_path}.{name}",
+                ResultContractError,
+                minimum=0.0,
+                maximum=1.0,
+            )
+        if not isinstance(event["audio_activity"], bool):
+            raise ResultContractError(f"{event_path}.audio_activity must be boolean")
+        if event["transcript_text"] is not None:
+            _string(
+                event["transcript_text"],
+                f"{event_path}.transcript_text",
+                ResultContractError,
+            )
+        evidence_paths = _validate_string_array(
+            event["evidence_paths"],
+            f"{event_path}.evidence_paths",
+            minimum=1,
+        )
+        if not all(item.startswith("measurements.") for item in evidence_paths):
+            raise ResultContractError(f"{event_path}.evidence_paths must target measurements")
+        previous_event_time = event_time
+
+
+def _validate_insights(value: object, duration: float) -> None:
+    path = "measurements.insights"
+    insights = _strict_fields(value, {"method", "items"}, path, ResultContractError)
+    _string(insights["method"], f"{path}.method", ResultContractError)
+    items = insights["items"]
+    if not isinstance(items, list):
+        raise ResultContractError(f"{path}.items must be an array")
+    for index, raw_item in enumerate(items):
+        item_path = f"{path}.items[{index}]"
+        item = _strict_fields(
+            raw_item,
+            {
+                "insight_id",
+                "kind",
+                "headline",
+                "statement",
+                "time_seconds",
+                "evidence_paths",
+            },
+            item_path,
+            ResultContractError,
+        )
+        expected_id = f"insight-{index + 1:02d}"
+        if item["insight_id"] != expected_id:
+            raise ResultContractError(f"{path}.insight IDs must be consecutive")
+        if item["kind"] not in {"OBSERVATION", "LIMITATION"}:
+            raise ResultContractError(f"{item_path}.kind is unsupported")
+        _string(item["headline"], f"{item_path}.headline", ResultContractError)
+        _string(item["statement"], f"{item_path}.statement", ResultContractError)
+        _number(
+            item["time_seconds"],
+            f"{item_path}.time_seconds",
+            ResultContractError,
+            minimum=0.0,
+            maximum=duration,
+            nullable=True,
+        )
+        evidence_paths = _validate_string_array(
+            item["evidence_paths"],
+            f"{item_path}.evidence_paths",
+            minimum=1,
+        )
+        if not all(item.startswith("measurements.") for item in evidence_paths):
+            raise ResultContractError(f"{item_path}.evidence_paths must target measurements")
+
+
 def _validate_measurements(value: object, capabilities: dict, analysis_input: dict) -> None:
     measurements = _strict_fields(
         value,
@@ -1833,6 +2503,11 @@ def _validate_measurements(value: object, capabilities: dict, analysis_input: di
             "video_analytics",
             "audio_analytics",
             "transcript",
+            "audio_activity",
+            "speech_segments",
+            "scene_segments",
+            "cross_modal",
+            "insights",
         },
         "measurements",
         ResultContractError,
@@ -2012,6 +2687,24 @@ def _validate_measurements(value: object, capabilities: dict, analysis_input: di
         capabilities["transcript_analysis"],
         analysis_input["transcript"],
     )
+    _validate_audio_activity(
+        measurements["audio_activity"],
+        audio_duration if audio_duration is not None else duration,
+        audio_available,
+        analysis_input["parameters"],
+        measurements["audible_intervals_seconds"],
+    )
+    _validate_speech_segments(
+        measurements["speech_segments"], duration, measurements["transcript"]
+    )
+    _validate_scene_segments(measurements["scene_segments"], duration)
+    _validate_cross_modal(
+        measurements["cross_modal"],
+        duration,
+        audio_available,
+        capabilities["cross_modal_analysis"],
+    )
+    _validate_insights(measurements["insights"], duration)
 
 
 def _validate_output_format(path: Path, name: str) -> None:

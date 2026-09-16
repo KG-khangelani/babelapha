@@ -172,7 +172,6 @@ function Resolve-WolframRuntime {
         [Parameter(Mandatory)] [version]$MinimumVersion
     )
 
-    $probeCode = 'ExportString[<|"version"->$Version,"versionNumber"->$VersionNumber,"releaseNumber"->$ReleaseNumber,"systemID"->$SystemID,"processorType"->$ProcessorType|>,"RawJSON","Compact"->True]'
     $failures = [System.Collections.Generic.List[string]]::new()
     $kernelCandidates = @(Get-WolframKernelCandidates -ExplicitPath $ExplicitKernelPath)
     if ($kernelCandidates.Count -eq 0) {
@@ -180,18 +179,33 @@ function Resolve-WolframRuntime {
     }
 
     foreach ($candidate in $kernelCandidates) {
-        $probeOutput = @(& $ScriptPath -local $candidate.Path -code $probeCode 2>&1)
-        $probeExitCode = $LASTEXITCODE
-        $jsonLine = $probeOutput |
-            ForEach-Object { [string]$_ } |
-            Where-Object { $_.TrimStart().StartsWith('{') } |
-            Select-Object -Last 1
-        if ($probeExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($jsonLine)) {
-            $failures.Add("$($candidate.Path) (exit $probeExitCode)")
-            if ($candidate.Explicit) {
-                break
+        $probePath = Join-Path ([System.IO.Path]::GetTempPath()) ("babelapha-wolfram-probe-{0}.json" -f [guid]::NewGuid().ToString("N"))
+        $wolframProbePath = $probePath.Replace('\', '/')
+        $probeCode = 'Export["{0}",<|"version"->$Version,"versionNumber"->$VersionNumber,"releaseNumber"->$ReleaseNumber,"systemID"->$SystemID,"processorType"->$ProcessorType|>,"RawJSON","Compact"->True]' -f $wolframProbePath
+        try {
+            $probeOutput = @(& $ScriptPath -local $candidate.Path -code $probeCode 2>&1)
+            $probeExitCode = $LASTEXITCODE
+            $jsonLine = if (Test-Path -LiteralPath $probePath -PathType Leaf) {
+                Get-Content -Raw -LiteralPath $probePath
             }
-            continue
+            else {
+                $probeOutput |
+                    ForEach-Object { [string]$_ } |
+                    Where-Object { $_.TrimStart().StartsWith('{') } |
+                    Select-Object -Last 1
+            }
+            if ($probeExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($jsonLine)) {
+                $failures.Add("$($candidate.Path) (exit $probeExitCode)")
+                if ($candidate.Explicit) {
+                    break
+                }
+                continue
+            }
+        }
+        finally {
+            if (Test-Path -LiteralPath $probePath) {
+                Remove-Item -LiteralPath $probePath -Force
+            }
         }
 
         try {

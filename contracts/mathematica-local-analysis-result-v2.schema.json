@@ -609,6 +609,170 @@
         }
       ]
     },
+    "audioActivityRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region_index", "start_seconds", "end_seconds", "active_duration_seconds", "interval_count", "duration_seconds", "activity_fraction"],
+      "properties": {
+        "region_index": {"type": "integer", "minimum": 1},
+        "start_seconds": {"type": "number", "minimum": 0.0},
+        "end_seconds": {"type": "number", "minimum": 0.0},
+        "active_duration_seconds": {"type": "number", "minimum": 0.0},
+        "interval_count": {"type": "integer", "minimum": 1},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "activity_fraction": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "audioActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "threshold_dbfs", "merge_gap_seconds", "minimum_region_seconds", "audible_coverage_fraction", "regions"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {"type": "string"},
+        "method": {"type": "string", "minLength": 1},
+        "threshold_dbfs": {"type": "number", "minimum": -120.0, "maximum": 0.0},
+        "merge_gap_seconds": {"type": "number", "minimum": 0.0},
+        "minimum_region_seconds": {"type": "number", "minimum": 0.0},
+        "audible_coverage_fraction": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0},
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/audioActivityRegion"}}
+      }
+    },
+    "speechNavigationSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["segment_index", "source_segment_index", "sentence_index", "start_seconds", "end_seconds", "duration_seconds", "text", "word_count", "timing_basis"],
+      "properties": {
+        "segment_index": {"type": "integer", "minimum": 1},
+        "source_segment_index": {"type": "integer", "minimum": 1},
+        "sentence_index": {"type": "integer", "minimum": 1},
+        "start_seconds": {"type": "number", "minimum": 0.0},
+        "end_seconds": {"type": "number", "minimum": 0.0},
+        "duration_seconds": {"type": "number", "minimum": 0.0},
+        "text": {"type": "string", "minLength": 1},
+        "word_count": {"type": "integer", "minimum": 1},
+        "timing_basis": {"enum": ["SOURCE_SEGMENT", "PROPORTIONAL_WITHIN_SOURCE_SEGMENT"]}
+      }
+    },
+    "speechSegments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "timing_basis", "speaker_diarization", "segment_count", "segments"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {"type": "string"},
+        "method": {"type": "string", "minLength": 1},
+        "timing_basis": {"enum": ["UNAVAILABLE", "SOURCE_SEGMENTS", "MIXED_WITH_ESTIMATED_SENTENCE_TIMING"]},
+        "speaker_diarization": {"const": "NOT_PERFORMED"},
+        "segment_count": {"type": "integer", "minimum": 0},
+        "segments": {"type": "array", "items": {"$ref": "#/$defs/speechNavigationSegment"}}
+      }
+    },
+    "sceneSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene_index", "start_seconds", "end_seconds", "duration_seconds", "sample_count", "representative_time_seconds", "mean_brightness", "mean_motion", "mean_colorfulness", "representative_color_hex", "entry_boundary_score"],
+      "properties": {
+        "scene_index": {"type": "integer", "minimum": 1},
+        "start_seconds": {"type": "number", "minimum": 0.0},
+        "end_seconds": {"type": "number", "minimum": 0.0},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+        "sample_count": {"type": "integer", "minimum": 1},
+        "representative_time_seconds": {"type": "number", "minimum": 0.0},
+        "mean_brightness": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "mean_motion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "mean_colorfulness": {"type": "number", "minimum": 0.0, "maximum": 2.0},
+        "representative_color_hex": {"type": "string", "pattern": "^#[A-F0-9]{6}$"},
+        "entry_boundary_score": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "sceneSegments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "minimum_separation_seconds", "boundary_count", "segments"],
+      "properties": {
+        "status": {"const": "AVAILABLE"},
+        "reason": {"const": ""},
+        "method": {"type": "string", "minLength": 1},
+        "minimum_separation_seconds": {"type": "number", "minimum": 0.0},
+        "boundary_count": {"type": "integer", "minimum": 0},
+        "segments": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sceneSegment"}}
+      }
+    },
+    "crossModalSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time_seconds", "motion", "rms_amplitude", "motion_normalized", "rms_normalized"],
+      "properties": {
+        "time_seconds": {"type": "number", "minimum": 0.0},
+        "motion": {"type": "number", "minimum": 0.0},
+        "rms_amplitude": {"type": "number", "minimum": 0.0},
+        "motion_normalized": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "rms_normalized": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "crossModalEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_index", "event_type", "time_seconds", "window_seconds", "score", "scene_score", "motion", "rms_amplitude", "motion_normalized", "rms_normalized", "audio_activity", "transcript_text", "evidence_paths"],
+      "properties": {
+        "event_index": {"type": "integer", "minimum": 1},
+        "event_type": {"enum": ["AUDIO_VISUAL_PEAK", "SCENE_CHANGE_WITH_AUDIO", "SCENE_CHANGE_IN_SILENCE"]},
+        "time_seconds": {"type": "number", "minimum": 0.0},
+        "window_seconds": {
+          "type": "array",
+          "prefixItems": [{"type": "number", "minimum": 0.0}, {"type": "number", "minimum": 0.0}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "scene_score": {"type": ["number", "null"], "minimum": 0.0, "maximum": 1.0},
+        "motion": {"type": "number", "minimum": 0.0},
+        "rms_amplitude": {"type": "number", "minimum": 0.0},
+        "motion_normalized": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "rms_normalized": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "audio_activity": {"type": "boolean"},
+        "transcript_text": {"type": ["string", "null"]},
+        "evidence_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^measurements\\."}}
+      }
+    },
+    "crossModal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "method", "sample_count", "motion_rms_pearson_correlation", "aligned_samples", "events"],
+      "properties": {
+        "status": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {"type": "string"},
+        "method": {"type": "string", "minLength": 1},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "motion_rms_pearson_correlation": {"type": ["number", "null"], "minimum": -1.0, "maximum": 1.0},
+        "aligned_samples": {"type": "array", "items": {"$ref": "#/$defs/crossModalSample"}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/crossModalEvent"}}
+      }
+    },
+    "insight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["insight_id", "kind", "headline", "statement", "time_seconds", "evidence_paths"],
+      "properties": {
+        "insight_id": {"type": "string", "pattern": "^insight-[0-9]{2}$"},
+        "kind": {"enum": ["OBSERVATION", "LIMITATION"]},
+        "headline": {"type": "string", "minLength": 1},
+        "statement": {"type": "string", "minLength": 1},
+        "time_seconds": {"type": ["number", "null"], "minimum": 0.0},
+        "evidence_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^measurements\\."}}
+      }
+    },
+    "insights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "items"],
+      "properties": {
+        "method": {"type": "string", "minLength": 1},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/insight"}}
+      }
+    },
     "measurements": {
       "type": "object",
       "additionalProperties": false,
@@ -629,7 +793,12 @@
         "video",
         "video_analytics",
         "audio_analytics",
-        "transcript"
+        "transcript",
+        "audio_activity",
+        "speech_segments",
+        "scene_segments",
+        "cross_modal",
+        "insights"
       ],
       "properties": {
         "duration_seconds": {"type": "number", "exclusiveMinimum": 0.0},
@@ -672,7 +841,12 @@
         "video": {"$ref": "#/$defs/videoMeasurements"},
         "video_analytics": {"$ref": "#/$defs/videoAnalytics"},
         "audio_analytics": {"$ref": "#/$defs/audioAnalytics"},
-        "transcript": {"$ref": "#/$defs/transcriptMeasurement"}
+        "transcript": {"$ref": "#/$defs/transcriptMeasurement"},
+        "audio_activity": {"$ref": "#/$defs/audioActivity"},
+        "speech_segments": {"$ref": "#/$defs/speechSegments"},
+        "scene_segments": {"$ref": "#/$defs/sceneSegments"},
+        "cross_modal": {"$ref": "#/$defs/crossModal"},
+        "insights": {"$ref": "#/$defs/insights"}
       }
     },
     "provenanceSummary": {
