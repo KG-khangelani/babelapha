@@ -87,4 +87,3 @@ The pilot report must include a signed-off operational record containing the
 intended environment, concurrency, activation mode, network assumptions,
 estimated utilization, artifact audience, and Wolfram licensing response. No
 production image or DAG should be merged before that checkpoint is approved.
-

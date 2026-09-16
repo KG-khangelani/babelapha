@@ -74,4 +74,3 @@ all of these conditions hold:
 
 If any of these conditions fails, keep Mathematica as a local research tool or
 reimplement the promoted method in Python.
-

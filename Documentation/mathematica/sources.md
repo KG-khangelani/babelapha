@@ -74,4 +74,3 @@ recheck them when the pilot starts and before a production decision.
   — shipped DAG task contracts and provenance implementation.
 - [`../../pipelines/airflow/dags/ingest_pipeline_local.py`](../../pipelines/airflow/dags/ingest_pipeline_local.py)
   — current local MinIO/FFmpeg ingestion behavior.
-

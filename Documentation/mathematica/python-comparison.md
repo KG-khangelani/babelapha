@@ -77,4 +77,3 @@ Wolfram should be recommended for automation only if:
   implement the stable production calculation in Python.
 - **Reject:** stop if licensing, activation, reproducibility, or portability
   cannot meet the gates.
-

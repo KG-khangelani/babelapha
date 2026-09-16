@@ -143,4 +143,3 @@ Every candidate function used in a pilot must be classified before execution:
 
 The pilot should prefer the first two classes. An external service must never
 be silently reached from a supposedly local or reproducible analysis.
-
