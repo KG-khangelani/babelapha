@@ -836,6 +836,24 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(boundary.ResultContractError, message):
                     boundary.validate_result(self.workspace)
 
+    def test_validate_rejects_volatile_audio_identifiers_in_notebook(self):
+        result = self._valid_result()
+        notebook = self.workspace / "output" / "analysis-notebook.nb"
+        body = notebook.read_bytes().replace(
+            b"Nearest frame time",
+            b'Nearest frame time\n"audioID" -> "random-runtime-uuid"',
+        )
+        notebook.write_bytes(body)
+        record = next(
+            item for item in result["outputs"] if item["path"] == notebook.name
+        )
+        record["sha256"] = hashlib.sha256(body).hexdigest()
+        record["size_bytes"] = len(body)
+        self._write_raw_result(result)
+
+        with self.assertRaisesRegex(boundary.ResultContractError, "volatile native audio"):
+            boundary.validate_result(self.workspace)
+
     def test_failed_revalidation_removes_stale_success_markers(self):
         result = self._valid_result()
         self._write_raw_result(result)

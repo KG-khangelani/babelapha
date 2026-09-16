@@ -2845,6 +2845,10 @@ def _validate_outputs(
         raise ResultContractError(
             "analysis-notebook.nb must contain an explicit local-video playback control"
         )
+    if b'"audioID" ->' in notebook_bytes:
+        raise ResultContractError(
+            "analysis-notebook.nb must not persist volatile native audio identifiers"
+        )
     if (audio_interactive or transcript_interactive) and b"PopupMenuBox[" not in notebook_bytes:
         raise ResultContractError(
             "analysis-notebook.nb must contain an available-data selector"

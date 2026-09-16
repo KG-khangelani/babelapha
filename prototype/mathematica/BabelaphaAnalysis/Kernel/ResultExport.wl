@@ -1,6 +1,7 @@
 PackageScoped[exportAnalysisArtifacts]
 PackageScoped[writeRawResult]
 PackageScoped[jsonSafe]
+PackageScoped[notebookWaveformPairs]
 
 jsonSafe[value_] := Replace[
     value,
@@ -516,7 +517,26 @@ notebookAudioDiagnosticPlots[audioAnalysis_Association] := Module[{specification
     ]
 ];
 
-notebookAudioOverviewPanel[audioAnalysis_Association] := Module[{audio, rms, centroid, panel},
+notebookWaveformPairs[audio_Audio, maximumPoints_Integer: 1600] := Module[
+    {data, mono, sampleRate, count, stride, indices},
+    data = Quiet@Check[Normal@AudioData[audio], $Failed];
+    mono = Which[
+        VectorQ[data, NumericQ], N[data],
+        MatrixQ[data, NumericQ] && Length[data] > 0, N[Mean[data]],
+        True, {}
+    ];
+    sampleRate = Quiet@Check[AudioMeasurements[audio, "SampleRate"], $Failed];
+    If[Head[sampleRate] === Quantity,
+        sampleRate = Quiet@Check[QuantityMagnitude@UnitConvert[sampleRate, "Hertz"], $Failed]
+    ];
+    If[mono === {} || ! NumericQ[sampleRate] || sampleRate <= 0., Return[{}]];
+    count = Length[mono];
+    stride = Max[1, Ceiling[count/maximumPoints]];
+    indices = Range[1, count, stride];
+    Transpose[{N[(indices - 1)/sampleRate], mono[[indices]]}]
+];
+
+notebookAudioOverviewPanel[audioAnalysis_Association] := Module[{audio, rms, centroid, waveform, panel},
     If[
         ! TrueQ[notebookLookup[audioAnalysis, "available", False]],
         Return[notebookCallout["No decodable audio track was found, so waveform and spectral diagnostics are unavailable.", "absent"]]
@@ -524,10 +544,26 @@ notebookAudioOverviewPanel[audioAnalysis_Association] := Module[{audio, rms, cen
     audio = notebookLookup[audioAnalysis, "audio", None];
     rms = notebookLookup[audioAnalysis, "rms_series", None];
     centroid = notebookLookup[audioAnalysis, "centroid_series", None];
+    waveform = If[AudioQ[audio], notebookWaveformPairs[audio], {}];
     panel = Grid[
         {
             {
-                AudioPlot[audio, PlotLabel -> Style["Waveform", 9, Bold, GrayLevel[.12]], PlotLayout -> "Averaged", AxesStyle -> GrayLevel[.18], TicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], ImageSize -> {315, 150}],
+                If[
+                    waveform === {},
+                    notebookCallout["Waveform samples were unavailable.", "absent"],
+                    ListLinePlot[
+                        waveform,
+                        PlotLabel -> Style["Waveform", 9, Bold, GrayLevel[.12]],
+                        Frame -> True,
+                        FrameStyle -> GrayLevel[.18],
+                        FrameTicksStyle -> GrayLevel[.22],
+                        LabelStyle -> Directive[GrayLevel[.15], 8],
+                        Axes -> False,
+                        FrameLabel -> {"Seconds", "Amplitude"},
+                        PlotRange -> All,
+                        ImageSize -> {315, 150}
+                    ]
+                ],
                 ListLinePlot[rms, PlotLabel -> Style["Local RMS amplitude", 9, Bold, GrayLevel[.12]], Frame -> True, FrameStyle -> GrayLevel[.18], FrameTicksStyle -> GrayLevel[.22], LabelStyle -> Directive[GrayLevel[.15], 8], Axes -> False, FrameLabel -> {"Seconds", "RMS"}, PlotRange -> All, ImageSize -> {315, 150}]
             },
             {

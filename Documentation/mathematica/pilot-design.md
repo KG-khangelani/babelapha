@@ -183,7 +183,7 @@ boundary and [the notebook map](notebook-sections.md) for the review surface.
 | Media analysis or export failure | Typed runtime/export failure, exit code 20 |
 | Invalid raw result or output hash | Python rejects it and does not write canonical `result.json` |
 
-The validated v2 reference run passed nineteen Wolfram package tests, direct video
+The validated v2 reference run passed twenty Wolfram package tests, direct video
 and audio analysis, all extended color/motion/sound measurements, local
 Whisper-V1 Tiny CPU transcription with three verified model components,
 seven-artifact export, and independent Python canonicalization. Its processor

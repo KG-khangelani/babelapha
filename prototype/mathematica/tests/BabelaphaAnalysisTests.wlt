@@ -229,3 +229,13 @@ VerificationTest[
     SameTest -> (Abs[#1 - #2] < 10.^-9 &),
     TestID -> "transcript-duration-is-bounded-by-canonical-media-duration"
 ]
+
+VerificationTest[
+    Module[{audio, pairs},
+        audio = Audio[N@Sin[2 Pi 440 Range[0, 7999]/8000], SampleRate -> 8000];
+        pairs = BabelaphaAnalysis`PackageScope`notebookWaveformPairs[audio, 400];
+        MatrixQ[pairs, NumericQ] && 1 <= Length[pairs] <= 400 && First[First[pairs]] == 0.
+    ],
+    True,
+    TestID -> "notebook-waveform-is-deterministic-plain-data"
+]
