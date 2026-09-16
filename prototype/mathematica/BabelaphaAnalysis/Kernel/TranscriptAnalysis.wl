@@ -251,12 +251,38 @@ transcriptUnavailable[method_String, reason_String, model_: Null] := <|
 |>;
 
 transcriptAudioChunks[audio_Audio, duration_?NumericQ, chunkSeconds_?NumericQ] := Module[
-    {starts, intervals, chunks},
+    {sampleRate, data, monoData, targetSampleCount, chunkCount, chunks},
     If[duration <= 0. || chunkSeconds <= 0., Return[$Failed]];
-    If[duration <= chunkSeconds, Return[{audio}]];
-    starts = Range[0., Max[0., N[duration] - 10.^-9], N[chunkSeconds]];
-    intervals = ({#, Min[N[duration], # + N[chunkSeconds]]} &) /@ starts;
-    chunks = Quiet@Check[AudioTrim[audio, #] & /@ intervals, $Failed];
+    sampleRate = Quiet@Check[AudioMeasurements[audio, "SampleRate"], $Failed];
+    If[Head[sampleRate] === Quantity,
+        sampleRate = Quiet@Check[QuantityMagnitude@UnitConvert[sampleRate, "Hertz"], $Failed]
+    ];
+    data = Quiet@Check[Normal@AudioData[audio], $Failed];
+    monoData = Which[
+        VectorQ[data, NumericQ], N[data],
+        MatrixQ[data, NumericQ] && Length[data] > 0, N[Mean[data]],
+        True, $Failed
+    ];
+    If[! NumericQ[sampleRate] || sampleRate <= 0. || monoData === $Failed || monoData === {}, Return[$Failed]];
+    targetSampleCount = Round[N[chunkSeconds] N[sampleRate]];
+    chunkCount = Max[1, Ceiling[N[duration]/N[chunkSeconds]]];
+    chunks = Table[
+        With[
+            {
+                start = 1 + (index - 1) targetSampleCount,
+                finish = Min[Length[monoData], index targetSampleCount]
+            },
+            Audio[
+                PadRight[
+                    If[start <= finish, Take[monoData, {start, finish}], {}],
+                    targetSampleCount,
+                    0.
+                ],
+                SampleRate -> N[sampleRate]
+            ]
+        ],
+        {index, chunkCount}
+    ];
     If[ListQ[chunks] && chunks =!= {} && AllTrue[chunks, AudioQ], chunks, $Failed]
 ];
 

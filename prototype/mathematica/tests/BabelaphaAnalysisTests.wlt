@@ -216,10 +216,11 @@ VerificationTest[
     Module[{audio, chunks},
         audio = Audio[ConstantArray[0., 8000], SampleRate -> 8000];
         chunks = BabelaphaAnalysis`PackageScope`transcriptAudioChunks[audio, 1., 30.];
-        ListQ[chunks] && Length[chunks] == 1 && SameQ[First[chunks], audio]
+        ListQ[chunks] && Length[chunks] == 1 && AudioQ[First[chunks]] &&
+            Abs[QuantityMagnitude@UnitConvert[Duration[First[chunks]], "Seconds"] - 30.] < 10.^-9
     ],
     True,
-    TestID -> "short-transcript-audio-does-not-require-padding"
+    TestID -> "short-transcript-audio-is-deterministically-zero-padded"
 ]
 
 VerificationTest[
