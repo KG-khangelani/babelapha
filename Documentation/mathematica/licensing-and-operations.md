@@ -45,7 +45,7 @@ deliver it through the runtime secret system.
   entitlement as a secret.
 - Do not publish an activated internal image to a registry unless the license
   explicitly permits that distribution model.
-- Record `$Version`, `$SystemID`, package hashes, paclet/resource identities,
+- Record `$Version`, `$SystemID`, the canonical notebook hash, paclet/resource identities,
   and relevant codec/library facts with every result.
 - Set CPU and memory limits. Wolfram kernels and media values can consume
   substantial memory, especially when frames are materialized.
@@ -78,7 +78,7 @@ deliver it through the runtime secret system.
 | External service changes result | Treat it as a separate, explicitly versioned nondeterministic processor |
 | Kernel concurrency exceeds entitlement | Align Airflow pools and task concurrency with licensed limits |
 | Long computation survives task cancellation | Configure execution timeout and terminate the kernel process group |
-| Notebook succeeds but CLI fails | Require the notebook to call the same tested package as `wolframscript` |
+| Notebook succeeds but CLI fails | Require `wolframscript` to import and evaluate the same tagged notebook cells |
 | Wolfram becomes unavailable | Keep ingestion independent and retain a Python promotion path |
 
 ## Commercial-readiness checkpoint

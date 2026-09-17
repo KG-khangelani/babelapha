@@ -6,7 +6,7 @@ The Wolfram-first local prototype is implemented as
 `mathematica-local-media-lab-v2` and has completed an independently validated
 end-to-end video run. The reference run exercised color, motion, sound, pitch,
 spectral, transcript, and cross-modal analysis and produced the rich
-thirteen-section notebook. The package requires Wolfram Language 15 or newer.
+code-bearing analysis notebook. The notebook requires Wolfram Language 15 or newer.
 The verified runtime for this checkout is **Wolfram Engine 15.0.0 for Windows
 x86-64**; every run records the exact kernel path and version rather than
 assuming a patch release.
@@ -48,7 +48,8 @@ Mathematica owns the analysis:
 - one shared media-time instrument aligning visual, sound, scene, speech, and
   cross-modal event evidence;
 - named-component `TimeSeries`, provenance `EventSeries`, and `Tabular` data;
-- plots, reports, and a reproducible thirteen-section Mathematica notebook with
+- plots, reports, and a reproducible code-bearing Mathematica notebook with
+  the complete implementation plus thirteen analytical sections,
   native video playback, one linked frame/audio/speech/scene/event cursor,
   transcript search, evidence-backed observations, and executable setup/rerun
   cells.
@@ -59,9 +60,10 @@ unsafe paths, independently rehashes every result artifact, and canonicalizes
 `result.raw.json` as `result.json`. It does not calculate the media results or
 produce the human-facing analysis.
 
-The Version 15 package uses Structured Package Format through
-`PackageInitialize` and registered typed exceptions. Expected failures map to
-stable reason codes and process exit codes.
+`prototype/mathematica/BabelaphaAnalysis.nb` is the canonical implementation.
+Its tagged input cells contain every analysis stage and its embedded tests;
+`wolframscript` evaluates those same cells through a thin loader. Registered
+typed exceptions still map expected failures to stable reason and exit codes.
 
 The current wire contracts are the three `mathematica-local-*-v2` schemas.
 The v1 schemas remain checked in as immutable historical contracts and are

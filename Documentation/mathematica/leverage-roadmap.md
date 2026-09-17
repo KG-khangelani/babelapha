@@ -29,7 +29,8 @@ The current v2 branch now provides:
 - one-command local execution through
   `scripts/Invoke-MathematicaLocalPrototype.ps1`;
 - explicit discovery and recording of an exact Wolfram Language 15+ kernel;
-- a Structured Package Format package with registered typed exceptions;
+- a canonical executable notebook with visible stage-labelled definitions and
+  registered typed exceptions;
 - direct Wolfram `Video` and `Audio` import and analysis;
 - per-frame color/palette, motion, histogram-distance, and scene-candidate
   measurements;
@@ -42,11 +43,11 @@ The current v2 branch now provides:
   with visual and sound measurements on a shared time axis;
 - named `TimeSeries`, provenance `EventSeries`, and `Tabular` representations;
 - seven hashed Wolfram outputs, including HTML/Markdown reports and an
-  interactive thirteen-section notebook with native playback, evidence-backed
+  interactive code-bearing notebook with native playback, evidence-backed
   observations, transcript search, and one shared frame/audio/speech/scene/event
   cursor;
 - strict Python input/evidence preparation and output canonicalization only;
-- v2 source/input/result schemas, independent package-hash binding, and an
+- v2 source/input/result schemas, independent notebook-hash binding, and an
   optional two-run repeatability gate;
 - Wolfram unit tests, Python boundary tests, a validated v2 media/Whisper run,
   and historical v1 repeatability/no-audio fallback evidence on Engine 15.0.0
@@ -75,23 +76,23 @@ inside the existing result contract.
 6. **Provenance exploration:** turn richer local evidence into graph and
    temporal views without replacing canonical source/evidence JSON.
 7. **Notebook interaction:** build on the implemented native playback and
-   linked media cursor with package-backed interval comparisons; production
-   calculations must stay in package code.
+   linked media cursor with notebook-backed interval comparisons; every
+   calculation must remain visible in the canonical notebook.
 8. **Text research:** after reviewed transcript artifacts exist, evaluate
    entity/text analysis and semantic retrieval as explicitly identified
    processors.
 
-Every experiment must identify its input bytes, exact kernel and package hash,
+Every experiment must identify its input bytes, exact kernel and notebook hash,
 parameters, outputs, and capabilities used. Cloud functions, implicit model
 downloads, LLM calls, and speech services remain off unless introduced as a
 separate, reviewable experiment.
 
 ## Local adoption gates
 
-A local experiment graduates into the shared package only when:
+A local experiment graduates into the canonical notebook only when:
 
 - it adds a clear analytical or explanatory capability;
-- reruns use the same package path as the generated notebook;
+- reruns evaluate the same tagged cells carried into the generated notebook;
 - outputs are portable and independently hash-verifiable;
 - failures are typed and no partial result is canonicalized;
 - a new wire shape receives a new schema/analysis version;

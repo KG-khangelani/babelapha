@@ -16,7 +16,8 @@ recheck them before a new runtime upgrade or production decision.
   highlighted areas.
 - [Structured Package Format](https://reference.wolfram.com/language/tutorial/UsingTheStructuredPackageFormat.html)
   and [PackageInitialize](https://reference.wolfram.com/language/ref/PackageInitialize)
-  — Version 15 multi-file package structure selected for the prototype.
+  — Version 15 packaging capability evaluated before the prototype selected a
+  notebook-first implementation for full cell-level transparency.
 - [CatchExceptions](https://reference.wolfram.com/language/ref/CatchExceptions.html)
   — Version 15 typed exception handling used for stable task failure mapping.
 - [Wolfram MCP server objects](https://reference.wolfram.com/language/Wolfram/AgentTools/ref/MCPServerObject.html)
@@ -96,9 +97,9 @@ recheck them before a new runtime upgrade or production decision.
   [`../../contracts/mathematica-local-analysis-result-v2.schema.json`](../../contracts/mathematica-local-analysis-result-v2.schema.json),
   and [`../../contracts/mathematica-local-source-evidence-v2.schema.json`](../../contracts/mathematica-local-source-evidence-v2.schema.json)
   — current local media-lab wire contracts.
-- [`../../prototype/mathematica/BabelaphaAnalysis/Kernel/init.wl`](../../prototype/mathematica/BabelaphaAnalysis/Kernel/init.wl)
-  — current Wolfram package entry point; package files and tests determine what
-  is actually implemented.
+- [`../../prototype/mathematica/BabelaphaAnalysis.nb`](../../prototype/mathematica/BabelaphaAnalysis.nb)
+  — canonical executable Wolfram notebook; its visible tagged input and test
+  cells determine what is actually implemented.
 - [`../pipeline-transparency.md`](../pipeline-transparency.md) — immutable stage
   manifests, evidence bundles, artifact identity, and final provenance gates.
 - [`../../contracts/provenance-manifest-v1.schema.json`](../../contracts/provenance-manifest-v1.schema.json)

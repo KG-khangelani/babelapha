@@ -23,7 +23,7 @@ flowchart LR
     PB --> E
     E --> PS[PowerShell launcher]
     PS --> WT[Wolfram tests]
-    WT --> WL[Version 15 SPF package]
+    WT --> WL[Version 15 executable notebook]
     I --> WL
     T --> WL
     M -. optional workspace manifests .-> WL
@@ -47,7 +47,7 @@ the architecture does not assume a particular patch version.
 |---|---|---|
 | PowerShell launcher | Runtime discovery, exact kernel selection, ordering, logs, completion checks | Media calculations or result interpretation |
 | Python boundary | Source/sidecar byte identity, local evidence, strict v2 JSON, safe paths, artifact rehashing, canonicalization | Media/transcript measurements, plots, reports, or notebook calculations |
-| Wolfram package | Video/audio import, media and transcript analysis, `TimeSeries`, `EventSeries`, `Tabular`, visualization, reports, notebook | Canonical JSON trust decision, implicit model acquisition, or remote publication |
+| Canonical Wolfram notebook | Video/audio import, media and transcript analysis, `TimeSeries`, `EventSeries`, `Tabular`, visualization, reports, embedded tests, and interactive review | Canonical JSON trust decision, implicit model acquisition, or remote publication |
 
 This split ensures that every human-facing analytical artifact is genuinely
 produced by Mathematica while portable identity and contract enforcement do
@@ -119,13 +119,13 @@ limited to the runtime record and launcher output.
 
 The prepare boundary hashes the user-selected source and any selected
 transcript sidecar and creates a canonical local evidence document. It also
-computes the complete Wolfram package hash and binds source, sidecar,
-parameters, package, and analysis identity into the deterministic run ID.
-Mathematica independently recomputes the package identity and verifies source,
+computes the complete canonical notebook hash and binds source, sidecar,
+parameters, notebook, and analysis identity into the deterministic run ID.
+Mathematica independently recomputes the notebook identity and verifies source,
 evidence, and sidecar byte identities before opening media. The validation
 boundary permits no undeclared result fields or outputs, checks method-specific
-transcript provenance, recomputes the current package hash, verifies the
-thirteen-section notebook structure and linked-cursor markers, and recomputes every declared output
+transcript provenance, recomputes the current notebook hash, verifies the
+complete notebook source, analytical structure, and linked-cursor markers, and recomputes every declared output
 identity. Preparing a new valid run removes prior canonical/raw result markers
 so a failed rerun cannot look successful.
 
@@ -137,10 +137,11 @@ analysis path sets `$AllowInternet = False`; a missing or mismatched model is a
 reported unavailable capability, never an implicit download. The validated v2
 reference result records CPU inference and `network_mode: disabled`.
 
-The package uses Structured Package Format and typed exceptions so callers can
-distinguish usage, invalid input, integrity, dependency, and analysis/export
-failures. Credentials and license material are never written to evidence,
-results, reports, or logs.
+The notebook uses visible stage-labelled input cells and typed exceptions so
+callers can distinguish usage, invalid input, integrity, dependency, and
+analysis/export failures. The thin CLI imports those exact tagged cells; it
+contains no media-analysis implementation. Credentials and license material
+are never written to evidence, results, reports, or logs.
 
 ## Deferred production topology
 

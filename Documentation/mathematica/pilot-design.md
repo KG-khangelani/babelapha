@@ -7,7 +7,7 @@ for a future Airflow task. Version 2 exercises Wolfram Language directly over
 one local video, adds rich visual/sound/transcript analysis, and retains
 portable, independently verified outputs.
 
-The package requires Wolfram Language 15 or newer. The completed reference run
+The executable notebook requires Wolfram Language 15 or newer. The completed reference run
 used **Wolfram Engine 15.0.0 for Microsoft Windows (64-bit)** on
 `Windows-x86-64`. The launcher records the exact runtime in
 `Local-prototype/artefacts/runtime.json` for every run.
@@ -59,8 +59,8 @@ flowchart LR
     V[One local video] --> P[Python prepare boundary]
     S[Optional local transcript sidecar] --> P
     P --> E[Source evidence and analysis input]
-    E --> T[Wolfram package tests]
-    T --> W[Wolfram media analysis]
+    E --> T[Embedded notebook tests]
+    T --> W[Evaluate canonical notebook]
     C[Explicit one-time Whisper cache] -. verified local resource .-> W
     W --> R[result.raw.json]
     W --> A[Seven analysis artifacts]
@@ -77,35 +77,29 @@ and does not start Docker, Airflow, MinIO, Pachyderm, or a cloud service.
 
 ```text
 prototype/mathematica/
-  BabelaphaAnalysis/Kernel/
-    init.wl
-    ErrorMapping.wl
-    InputValidation.wl
-    EvidenceAdapter.wl
-    MediaAnalysis.wl
-    TranscriptAnalysis.wl
-    ResultExport.wl
-    PublicAPI.wl
+  BabelaphaAnalysis.nb
+  notebook-runtime.wls
   analyze.wls
   cache-whisper-model.wls
   local_boundary.py
   tests/
-    BabelaphaAnalysisTests.wlt
     run-tests.wls
 ```
 
-- `init.wl` initializes the Version 15 Structured Package Format package with
-  `PackageInitialize`.
-- Registered exception types distinguish invalid input, integrity,
+- `BabelaphaAnalysis.nb` contains every stage-labelled definition, the
+  verification tests, the run cell, and the interactive presentation code.
+- `notebook-runtime.wls` only imports and evaluates tagged notebook cells; it
+  contains no analytical implementation.
+- Typed exception definitions in the notebook distinguish invalid input, integrity,
   dependencies, analysis runtime, and export failures.
-- `analyze.wls` is a thin CLI over the exported package function. The generated
-  notebook calls that same package and contains no private calculation path.
+- `analyze.wls` is a thin CLI over the notebook's visible run cell. The
+  generated notebook carries those same source cells with the measured output.
 - `local_boundary.py` is dependency-free Python and owns only source identity,
   strict contracts, safe paths, output rehashing, and canonical JSON.
 
 ## Mathematica workload
 
-The package opens the source directly as a Wolfram `Video`, samples twelve
+The notebook opens the source directly as a Wolfram `Video`, samples twelve
 uniform frames, and constructs a named `TimeSeries` for brightness and
 mean-absolute grayscale frame difference. It calculates frame dimensions,
 mean RGB, brightness, saturation, contrast, colorfulness, a deterministic
@@ -138,10 +132,10 @@ summaries.
 The Python preparation step writes canonical
 `artefacts/source-evidence.json` and `artefacts/analysis-input.json`. Their
 current v2 schemas define source and optional transcript-sidecar SHA-256 and
-byte size, local object/run identity, the exact Wolfram package SHA-256, fixed
+byte size, local object/run identity, the exact canonical notebook SHA-256, fixed
 analysis parameters, transcript mode, evidence identity, and the relative
 output directory. The run ID changes when the source, sidecar, parameters,
-analysis, or package changes. Mathematica independently recomputes the package
+analysis, or notebook changes. Mathematica independently recomputes the notebook
 hash and rechecks source/evidence/sidecar hashes before analysis.
 
 Wolfram produces `result.raw.json` plus these seven declared outputs:
@@ -154,7 +148,7 @@ Wolfram produces `result.raw.json` plus these seven declared outputs:
 | `video-summary.png` | Wolfram `VideoSummaryPlot` output |
 | `report.md` | Portable text report with measurements and capabilities |
 | `report.html` | Self-contained local review page referencing the plots |
-| `analysis-notebook.nb` | Rich thirteen-section review notebook, linked media cursor, and shared-package rerun cell |
+| `analysis-notebook.nb` | Complete executable source and tests plus the rich analytical sections and linked media cursor |
 
 Python then validates exact keys and types, rejects duplicate/nonfinite JSON,
 ensures every output is a direct child of `output/`, checks the exact seven-file
@@ -170,7 +164,7 @@ The current contracts are:
 The v1 schemas remain immutable for historical readers. They describe the
 smaller original media pilot and are superseded by v2 rather than edited or
 deleted. See [the contract inventory](../../contracts/README.md) for the exact
-boundary and [the notebook map](notebook-sections.md) for the review surface.
+boundary and [the notebook map](notebook-sections.md) for the executable analysis surface.
 
 ## Failure and acceptance behavior
 
@@ -183,7 +177,7 @@ boundary and [the notebook map](notebook-sections.md) for the review surface.
 | Media analysis or export failure | Typed runtime/export failure, exit code 20 |
 | Invalid raw result or output hash | Python rejects it and does not write canonical `result.json` |
 
-The validated v2 reference run passed twenty Wolfram package tests, direct video
+The validated v2 reference run passed twenty embedded Wolfram notebook tests, direct video
 and audio analysis, all extended color/motion/sound measurements, local
 Whisper-V1 Tiny CPU transcription with three verified model components,
 seven-artifact export, and independent Python canonicalization. Its processor

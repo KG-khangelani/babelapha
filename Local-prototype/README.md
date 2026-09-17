@@ -25,7 +25,7 @@ Copy-Item C:\path\to\video.mp4 .\Local-prototype\ingest\
 ```
 
 The default transcript mode is `prefer_sidecar`: a matching local `.txt`,
-`.srt`, or `.vtt` file in `transcripts/` wins; otherwise the package uses the
+`.srt`, or `.vtt` file in `transcripts/` wins; otherwise the notebook uses the
 verified local Wolfram Whisper V1 Tiny cache. Model acquisition is an explicit,
 one-time online preparation step. The subsequent analysis remains offline:
 
@@ -56,9 +56,11 @@ an auditable reason.
 
 The launcher discovers installed Wolfram products, tests each candidate
 through `wolframscript -local`, selects a working Version 15-or-newer kernel,
-and records its exact identity. Python hashes the complete Wolfram package
-before execution; that digest is bound into the run ID and must match the hash
-independently computed by Wolfram and returned in the result. Override
+and records its exact identity. Python hashes the complete canonical Wolfram
+notebook before execution; that digest is bound into the run ID and must match
+the hash independently computed by Wolfram and returned in the result. The v2
+wire-contract field remains named `package_sha256` for compatibility, but its
+value now identifies `prototype/mathematica/BabelaphaAnalysis.nb`. Override
 discovery without changing global WolframScript configuration when necessary:
 
 ```powershell
@@ -108,8 +110,9 @@ $runtime = .\scripts\Invoke-MathematicaLocalPrototype.ps1 -PreflightOnly |
   -file .\prototype\mathematica\tests\run-tests.wls
 ```
 
-The notebook is a review surface, not a raw result dump. A successful export
-must visibly include an executive summary, storyboard, color and motion
+The notebook is the canonical executable program as well as the review
+surface. A successful export must visibly include the complete runnable source,
+embedded verification tests, an executive summary, storyboard, color and motion
 analytics, sound analytics, transcript/speech status, a synchronized
 cross-modal timeline, capability coverage, methodology, and reproducibility
 evidence. If a transcript or local speech model is absent, the transcript
@@ -131,17 +134,18 @@ stable programmatic seek binding. Transcript
 diagnostics display the actual emitted mode, status, method, model or sidecar,
 and failure reason; the exporter does not replace them with generic text.
 
-The current notebook has thirteen sections and embeds the analytical
-graphics directly: six KPI cards, an evidence-backed insight table, a linked
+The current notebook carries the complete stage-labelled implementation plus
+the analytical sections and embedded graphics: six KPI cards, an
+evidence-backed insight table, a linked
 media explorer, a contact sheet for all twelve sampled frames, dominant colors,
 RGB/brightness trajectories, motion and scene-change candidates, waveform,
 RMS/peak/loudness curves, spectral centroid/spread, zero-crossing rate,
 fundamental-frequency candidates, spectrogram, audible/silent intervals,
 transcript statistics, a shared cross-modal timeline, provenance, output
-inventory, capability coverage, methodology, and a package-backed rerun cell.
+inventory, capability coverage, methodology, and a notebook-native rerun cell.
 
 Everything under `ingest/`, `transcripts/`, `models/`, `artefacts/`, `output/`,
 `logs/`, and `work/` stays local and is ignored by Git except for the directory
-placeholders. The pushed prototype consists of the package, launcher,
-contracts, tests, and documentation—not the personal media or generated
+placeholders. The pushed prototype consists of the canonical source notebook,
+thin notebook loader and launchers, contracts, and documentation—not the personal media or generated
 analysis products.

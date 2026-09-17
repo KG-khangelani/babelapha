@@ -5,8 +5,9 @@
 The relevant product distinction is between **Mathematica**, which includes
 the notebook interface, and the **Wolfram Engine**, which can execute the same
 language headlessly. The architectural opportunity is therefore not two
-separate implementations: it is one Wolfram package used interactively during
-discovery and invoked by `wolframscript` after promotion.
+separate implementations: it is one canonical Mathematica notebook used
+interactively and evaluated cell-for-cell by `wolframscript` for repeatable
+local runs.
 
 ### Cross-domain symbolic workflow
 

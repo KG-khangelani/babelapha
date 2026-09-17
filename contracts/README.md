@@ -77,8 +77,9 @@ set. It does not depend on Airflow, MinIO, or the provenance read API:
   discovery/hash-verification events;
 - `mathematica-local-analysis-input-v2.schema.json` binds that evidence,
   source, optional sidecar, transcript mode, analysis parameters, and Wolfram
-  package SHA-256 to `mathematica-local-media-lab-v2` and a deterministic run
-  identity;
+  canonical executable-notebook SHA-256 to `mathematica-local-media-lab-v2`
+  and a deterministic run identity. The field remains named `package_sha256`
+  in the frozen v2 wire shape for compatibility;
 - `mathematica-local-analysis-result-v2.schema.json` defines the processor,
   source/input identity, color/motion/sound/pitch/transcript/cross-modal
   measurements, summarized `TimeSeries`/`EventSeries`/`Tabular` structures,
@@ -118,8 +119,8 @@ document as if it contained v2 transcript or extended-media evidence.
 and analysis input before Wolfram runs. After Mathematica writes
 `output/result.raw.json`, the same boundary rejects unknown fields, duplicate
 keys, nonfinite values, unsafe paths, identity mismatches, and missing or
-altered outputs. It also requires the eleven notebook section markers and at
-least five embedded graphics. It recomputes the SHA-256 and byte size for the
+altered outputs. It also requires the analytical section markers, the complete
+executable source markers, and at least five embedded graphics. It recomputes the SHA-256 and byte size for the
 exact seven declared Wolfram artifacts:
 
 ```text
@@ -135,7 +136,7 @@ video-summary.png
 Only then does it write `output/result.json` using
 `SORTED_INDENTED_JSON_V1`. Python is the contract and integrity boundary; all
 media/transcript measurements and the seven analytical artifacts are produced
-by the local Wolfram package. The validated v2 reference run used Wolfram
+by the canonical local Wolfram notebook. The validated v2 reference run used Wolfram
 Engine 15.0.0 on Windows x86-64, reported `network_mode: disabled`, and returned
 `USED` for every core capability, including local Whisper transcription. That
 is local validation evidence, not a claim that the v2 lab is deployed in an

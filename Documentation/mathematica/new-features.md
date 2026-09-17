@@ -24,13 +24,13 @@ from Babelapha having exercised it successfully:
 
 | Wolfram capability | v2 status | Babelapha use |
 |---|---|---|
-| Version 15 Structured Package Format and `PackageInitialize` | Validated | Multi-file `BabelaphaAnalysis` package |
+| Version 15 Structured Package Format and `PackageInitialize` | Evaluated, then superseded for this prototype | Notebook-first transparency was selected instead of hidden package files |
 | Version 15 registered exceptions | Validated | Stable reason and exit-code mapping |
 | New-generation named `TimeSeries` and `EventSeries` | Validated | Media measurements and ordered evidence summaries |
 | `Tabular` interoperability | Validated | Typed internal evidence table with portable summary |
 | First-class `Video`, `Audio`, plots, and spectrograms | Validated | Color, motion, sound, pitch, and notebook visuals |
 | Wolfram neural-network repository resource | Validated locally | Pinned and hash-verified Whisper-V1 Tiny CPU inference |
-| Rich Mathematica notebook authoring | Validated | Thirteen-section `Default.nb` notebook with one linked `DynamicModule` media cursor, native playback, transcript search, evidence-backed observations, and package-backed input cells |
+| Rich Mathematica notebook authoring | Validated | Code-bearing `Default.nb` notebook with complete stage definitions, embedded tests, one linked `DynamicModule` media cursor, native playback, transcript search, and evidence-backed observations |
 | `ModelFit`/`ModelFitReport`, semantic retrieval, LLM graphs, MCP, standalone applications, AI Assistant | Not implemented | Separately gated future experiments |
 
 The Whisper cache command is intentionally the only network-enabled step. The
@@ -56,7 +56,7 @@ This maps naturally to two Babelapha datasets:
 - pipeline events indexed by execution time, such as task attempts, decisions,
   retries, delivery receipts, and artifact publication.
 
-The package builds named media `TimeSeries` values and an evidence
+The notebook builds named media `TimeSeries` values and an evidence
 `EventSeries`; the result exports only plain JSON measurements and structural
 summaries. Additional Version 15 series operations remain opportunities, not
 claims about the current output.
@@ -66,7 +66,7 @@ claims about the current output.
 `Tabular` arrived in Version 14.2 and Version 15 added richer summaries,
 conversions, categorical values, and integration with time/event series.
 
-The v2 package converts the local evidence events into a `Tabular` value and
+The v2 notebook converts the local evidence events into a `Tabular` value and
 exports its row/column summary. Richer pipeline evidence columns and categorical
 modeling remain follow-on work. Preserve unknown or future values as validation
 failures rather than silently recoding them.
@@ -88,24 +88,27 @@ These are useful for explainable run-duration baselines and anomaly research:
 Do not enable automated operational decisions from a fitted model in the first
 pilot. The initial output is diagnostic evidence for a human reviewer.
 
-### Structured Package Format and exception handling
+### Notebook-first execution and exception handling
 
 Version 15's `PackageInitialize` supports the Structured Package Format, and
 the new exception framework provides `CatchExceptions`, `ThrowException`, and
-registered exception types.
+registered exception types. The prototype evaluated the package format, then
+deliberately moved the implementation into the notebook because visible,
+cell-level transparency is the governing requirement here.
 
 The prototype uses these features to:
 
-- split input validation, evidence adaptation, media analysis, result export,
-  and error mapping into testable package files;
-- expose only the package's intended public functions;
+- separate input validation, evidence adaptation, media analysis, result
+  export, and error mapping into stage-labelled notebook cell groups;
+- expose the complete implementation and tests in the generated notebook;
 - translate typed Wolfram exceptions into stable CLI exit codes and Babelapha
   reason codes;
 - return a `Failure`/JSON error document for expected failures while allowing
   unexpected exceptions to fail the task.
 
-This replaces the single large `.wl` package shape suggested in the original
-pilot document.
+The command-line loader evaluates those exact tagged cells and contains no
+analytical code. Typed exceptions remain useful without hiding the
+implementation behind package files.
 
 ### Notebook and Markdown interoperability
 
@@ -172,14 +175,14 @@ startup overhead. It is not a workaround for licensing approval.
 Version 15 embeds an AI Assistant in notebooks. It may improve investigator
 productivity, but generated code and narrative are proposals until reviewed.
 Assistant prompts, providers, and outputs are not part of the deterministic
-analysis package and must not be silently introduced into headless runs.
+analysis notebook and must not be silently introduced into headless runs.
 
 ## Features deliberately excluded from the canonical path
 
 - automatic cloud or LLM calls;
 - implicit model or paclet downloads;
 - MCP write tools;
-- notebook-only calculations;
+- calculations outside the canonical notebook;
 - opaque automated model choice without exported method facts;
 - experimental functions without an explicit engine pin and acceptance test;
 - Wolfram transcoding in place of FFmpeg.
