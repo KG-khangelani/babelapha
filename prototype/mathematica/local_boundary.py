@@ -25,9 +25,7 @@ SCHEMA_VERSION = "2.0.0"
 SOURCE_EVIDENCE_VERSION = "2.0.0"
 ANALYSIS_ID = "mathematica-local-media-lab-v2"
 CANONICALIZATION = "SORTED_INDENTED_JSON_V1"
-PACKAGE_KERNEL_DIRECTORY = (
-    Path(__file__).resolve().parent / "BabelaphaAnalysis" / "Kernel"
-)
+NOTEBOOK_SOURCE_PATH = Path(__file__).resolve().parent / "BabelaphaAnalysis.nb"
 
 DEFAULT_PARAMETERS = {
     "silence_threshold_db": -40.0,
@@ -213,13 +211,16 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def package_source_hash(directory: Path = PACKAGE_KERNEL_DIRECTORY) -> str:
-    """Match BabelaphaAnalysis`PackageSourceHash using portable file digests."""
-    files = sorted(directory.glob("*.wl"), key=lambda path: path.name.casefold())
-    if not files:
-        raise InputContractError(f"No Wolfram package sources found in {directory}")
-    components = [f"{path.name}:{sha256_file(path)}" for path in files]
-    return hashlib.sha256("\n".join(components).encode("utf-8")).hexdigest()
+def notebook_source_hash(notebook: Path = NOTEBOOK_SOURCE_PATH) -> str:
+    """Return the SHA-256 identity of the canonical executable notebook."""
+    if not notebook.is_file():
+        raise InputContractError(f"Canonical Wolfram notebook not found: {notebook}")
+    return sha256_file(notebook)
+
+
+def package_source_hash(notebook: Path = NOTEBOOK_SOURCE_PATH) -> str:
+    """Compatibility alias for the frozen v2 package_sha256 field name."""
+    return notebook_source_hash(notebook)
 
 
 def _atomic_write(path: Path, body: bytes) -> None:
@@ -534,7 +535,7 @@ def prepare_analysis_input(
         )
     transcript = {"mode": transcript_mode, "sidecar": sidecar}
     normalized_parameters = _parameters(parameters or DEFAULT_PARAMETERS)
-    package_sha256 = package_source_hash()
+    package_sha256 = notebook_source_hash()
     object_id = f"local-{_slug(source_path.stem)}-{source['sha256'][:12]}"
     run_id = _run_id(source["sha256"], normalized_parameters, package_sha256, transcript)
 
@@ -802,8 +803,8 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
     expected_package_sha256 = _sha256(
         analysis_input["package_sha256"], "package_sha256", InputContractError
     )
-    if package_source_hash() != expected_package_sha256:
-        raise IntegrityError("Wolfram package SHA-256 differs from analysis input")
+    if notebook_source_hash() != expected_package_sha256:
+        raise IntegrityError("Canonical Wolfram notebook SHA-256 differs from analysis input")
     source = _validate_source(analysis_input["source"], "source", InputContractError)
     transcript = _validate_transcript_config(analysis_input["transcript"])
     parameters = _parameters(analysis_input["parameters"])
@@ -828,7 +829,7 @@ def validate_analysis_input(workspace: str | Path, input_path: Path | None = Non
         source["sha256"], parameters, expected_package_sha256, transcript
     ):
         raise IntegrityError(
-            "run_id does not match source, transcript, parameter, and package identity"
+            "run_id does not match source, transcript, parameter, and notebook identity"
         )
     expected_object_id = f"local-{_slug(source_path.stem)}-{source['sha256'][:12]}"
     if analysis_input["object_id"] != expected_object_id:
@@ -2810,7 +2811,8 @@ def _validate_outputs(
         b"Provenance and evidence",
         b"Output inventory",
         b"Capabilities and methodology",
-        b"Re-run through the verified package",
+        b"Complete executable Mathematica source",
+        b"Re-run the verified notebook",
     )
     missing_sections = [
         section.decode("ascii")
@@ -2821,6 +2823,23 @@ def _validate_outputs(
         raise ResultContractError(
             "analysis-notebook.nb is missing required analytical sections: "
             + ", ".join(missing_sections)
+        )
+    required_source_markers = (
+        b"analyzeVideoFrames",
+        b"analyzeAudioTrack",
+        b"analyzeTranscriptWithWhisper",
+        b"deriveMediaIntelligence",
+        b"RunAnalysisFile",
+    )
+    missing_source = [
+        marker.decode("ascii")
+        for marker in required_source_markers
+        if marker not in notebook_bytes
+    ]
+    if missing_source:
+        raise ResultContractError(
+            "analysis-notebook.nb is missing executable Mathematica source: "
+            + ", ".join(missing_source)
         )
     if notebook_bytes.count(b"GraphicsBox[") < 5:
         raise ResultContractError(
@@ -2948,9 +2967,9 @@ def validate_result(
         ResultContractError,
     )
     if processor_package_sha256 != analysis_input["package_sha256"]:
-        raise IntegrityError("Processor package SHA-256 differs from verified analysis input")
-    if package_source_hash() != processor_package_sha256:
-        raise IntegrityError("Processor package SHA-256 differs from current package sources")
+        raise IntegrityError("Processor notebook SHA-256 differs from verified analysis input")
+    if notebook_source_hash() != processor_package_sha256:
+        raise IntegrityError("Processor notebook SHA-256 differs from the canonical source notebook")
     if processor["network_mode"] != "disabled":
         raise ResultContractError("processor.network_mode must be disabled")
     _validate_runtime_manifest(root, processor, analysis_input)

@@ -1,14 +1,15 @@
 #!/usr/bin/env wolframscript
 
 scriptDirectory = DirectoryName[ExpandFileName[$InputFileName]];
-packageLoader = FileNameJoin[{scriptDirectory, "BabelaphaAnalysis", "Kernel", "init.wl"}];
+notebookPath = FileNameJoin[{scriptDirectory, "BabelaphaAnalysis.nb"}];
+runtimeLoader = FileNameJoin[{scriptDirectory, "notebook-runtime.wls"}];
 
-If[! FileExistsQ[packageLoader],
-    WriteString[$Output, "BabelaphaAnalysis package loader not found.\n"];
+If[! FileExistsQ[notebookPath] || ! FileExistsQ[runtimeLoader],
+    WriteString[$Output, "The canonical Babelapha Mathematica notebook or its thin runtime loader was not found.\n"];
     Exit[12]
 ];
 
-Get[packageLoader];
+Get[runtimeLoader];
 
 arguments = Rest[$ScriptCommandLine];
 inputPosition = FirstPosition[arguments, "--input", Missing["NotFound"]];
@@ -19,7 +20,15 @@ If[MissingQ[inputPosition] || First[inputPosition] >= Length[arguments],
 ];
 
 inputPath = arguments[[First[inputPosition] + 1]];
-result = BabelaphaAnalysis`RunAnalysisFile[inputPath];
+Global`$BabelaphaNotebookSourcePath = notebookPath;
+Global`$BabelaphaNotebookInputPath = ExpandFileName[inputPath];
+
+If[BabelaphaNotebookEvaluateTag[notebookPath, "BabelaphaDefinitions"] === $Failed,
+    WriteString[$Output, "The canonical notebook definitions could not be evaluated.\n"];
+    Exit[12]
+];
+
+result = BabelaphaNotebookEvaluateTag[notebookPath, "BabelaphaRun"];
 
 If[FailureQ[result],
     WriteString[
@@ -27,9 +36,9 @@ If[FailureQ[result],
         ExportString[
             <|
                 "status" -> "FAILED",
-                "reason" -> BabelaphaAnalysis`FailureReason[result],
+                "reason" -> BabelaphaNotebook`FailureReason[result],
                 "message" -> Lookup[result[[2]], "Message", "Mathematica analysis failed."],
-                "exit_code" -> BabelaphaAnalysis`FailureExitCode[result],
+                "exit_code" -> BabelaphaNotebook`FailureExitCode[result],
                 "details" -> KeyTake[
                     result[[2]],
                     {"Path", "Format", "Expected", "Actual", "Index", "Location"}
@@ -38,7 +47,7 @@ If[FailureQ[result],
             "RawJSON"
         ] <> "\n"
     ];
-    Exit[BabelaphaAnalysis`FailureExitCode[result]]
+    Exit[BabelaphaNotebook`FailureExitCode[result]]
 ];
 
 WriteString[

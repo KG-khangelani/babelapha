@@ -441,7 +441,7 @@ $runtimeRecord |
 
 if (-not $SkipWolframTests) {
     Invoke-LoggedCommand `
-        -Label "Run Wolfram package tests" `
+        -Label "Run embedded Wolfram notebook tests" `
         -FilePath $wolframScript `
         -Arguments @("-local", $runtime.KernelPath, "-file", $testScript) `
         -LogPath $logPath

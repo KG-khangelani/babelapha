@@ -1,10 +1,11 @@
 #!/usr/bin/env wolframscript
 
 scriptDirectory = DirectoryName[ExpandFileName[$InputFileName]];
-packageLoader = FileNameJoin[{scriptDirectory, "BabelaphaAnalysis", "Kernel", "init.wl"}];
+notebookPath = FileNameJoin[{scriptDirectory, "BabelaphaAnalysis.nb"}];
+runtimeLoader = FileNameJoin[{scriptDirectory, "notebook-runtime.wls"}];
 
-If[! FileExistsQ[packageLoader],
-    WriteString[$Output, "BabelaphaAnalysis package loader not found.\n"];
+If[! FileExistsQ[notebookPath] || ! FileExistsQ[runtimeLoader],
+    WriteString[$Output, "The canonical Babelapha Mathematica notebook or its thin runtime loader was not found.\n"];
     Exit[12]
 ];
 
@@ -28,8 +29,13 @@ If[MemberQ[{encoder, decoder, labels}, $Failed],
 ];
 
 $AllowInternet = False;
-Get[packageLoader];
-identity = BabelaphaAnalysis`PackageScope`whisperTranscriptModelIdentity[];
+Get[runtimeLoader];
+Global`$BabelaphaNotebookSourcePath = notebookPath;
+If[BabelaphaNotebookEvaluateTag[notebookPath, "BabelaphaDefinitions"] === $Failed,
+    WriteString[$Output, "The canonical notebook definitions could not be evaluated.\n"];
+    Exit[12]
+];
+identity = BabelaphaNotebook`Private`whisperTranscriptModelIdentity[];
 
 WriteString[$Output, ExportString[<|
     "status" -> Lookup[identity, "status", "FAILED"],

@@ -97,7 +97,8 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                     "Provenance and evidence",
                     "Output inventory",
                     "Capabilities and methodology",
-                    "Re-run through the verified package",
+                    "Complete executable Mathematica source",
+                    "Re-run the verified notebook",
                 ]
                 body = (
                     "Notebook[{\n"
@@ -110,6 +111,11 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
                     + "AnimatorBox[{}]\n"
                     + "InputFieldBox[{}]\n"
                     + 'ButtonBox["Load local video"]\n'
+                    + "analyzeVideoFrames\n"
+                    + "analyzeAudioTrack\n"
+                    + "analyzeTranscriptWithWhisper\n"
+                    + "deriveMediaIntelligence\n"
+                    + "RunAnalysisFile\n"
                     + "Shared media time\n"
                     + "Nearest frame time\n"
                     + "InitializationCell -> True\n"
@@ -661,17 +667,17 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(boundary.IntegrityError, "SHA-256 differs"):
             boundary.validate_analysis_input(self.workspace)
 
-    def test_prepared_input_binds_the_current_wolfram_package(self):
+    def test_prepared_input_binds_the_canonical_wolfram_notebook(self):
         analysis_input = self._input()
         self.assertEqual(
             analysis_input["package_sha256"],
-            boundary.package_source_hash(),
+            boundary.notebook_source_hash(),
         )
         analysis_input["package_sha256"] = "0" * 64
         input_path = self.workspace / "artefacts" / "analysis-input.json"
         input_path.write_bytes(boundary.canonical_json_bytes(analysis_input))
 
-        with self.assertRaisesRegex(boundary.IntegrityError, "package SHA-256 differs"):
+        with self.assertRaisesRegex(boundary.IntegrityError, "notebook SHA-256 differs"):
             boundary.validate_analysis_input(self.workspace)
 
     def test_validate_canonicalizes_complete_mathematica_result(self):
@@ -820,6 +826,7 @@ class MathematicaLocalBoundaryTests(unittest.TestCase):
             (b"DynamicModuleBox[", b"StaticModuleBox[", "linked native"),
             (b'StyleDefinitions -> "Default.nb"', b'StyleDefinitions -> "Custom.nb"', "default notebook styles"),
             (b"wolfram_whisper_v1_tiny", b"missing_transcript_method", "actual transcript method"),
+            (b"analyzeAudioTrack", b"missingAudioImplementation", "missing executable Mathematica source"),
         )
         for old, new, message in cases:
             with self.subTest(message=message):
